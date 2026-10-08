@@ -164,9 +164,10 @@ export function icon(name: keyof typeof ICON_PATHS, opts: { size?: number; class
   return `<svg class="icon${cls}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="${fill}" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICON_PATHS[name] || ""}</svg>`;
 }
 
-export type NavKey = "chat" | "dashboard" | "waitlist" | "settings";
+export type NavKey = "chat" | "dashboard" | "waitlist" | "settings" | "operations";
 
 const NAV_ITEMS: { key: NavKey; href: string; label: string; icon: keyof typeof ICON_PATHS }[] = [
+  { key: "operations", href: "/simulator/operations", label: "Recepción", icon: "calendar" },
   { key: "chat", href: "/simulator/", label: "Chat", icon: "chat" },
   { key: "dashboard", href: "/simulator/dashboard", label: "Overview", icon: "overview" },
   { key: "waitlist", href: "/simulator/waitlist", label: "Lista de espera", icon: "waitlist" },
@@ -468,16 +469,22 @@ function confirmDialog(message, confirmLabel) {
       '<button class="dlg-btn-danger" data-action="ok"></button></div></div>';
     overlay.querySelector("p").textContent = message;
     overlay.querySelector(".dlg-btn-danger").textContent = confirmLabel || "Confirmar";
-    function done(result) { overlay.remove(); resolve(result); }
+    const previousFocus = document.activeElement;
+    let finished = false;
+    function done(result) { if (finished) return; finished = true; document.removeEventListener("keydown", onKey); overlay.remove(); if (previousFocus) previousFocus.focus(); resolve(result); }
     overlay.addEventListener("click", (e) => {
       const action = e.target.getAttribute("data-action");
       if (action) done(action === "ok");
       else if (e.target === overlay) done(false);
     });
-    document.addEventListener("keydown", function onKey(e) {
-      if (e.key === "Escape") { document.removeEventListener("keydown", onKey); done(false); }
-    });
+    function onKey(e) {
+      if (e.key === "Escape") done(false);
+      if (e.key === "Tab") { const buttons = overlay.querySelectorAll("button"); e.preventDefault(); (document.activeElement === buttons[0] ? buttons[1] : buttons[0]).focus(); }
+    }
+    document.addEventListener("keydown", onKey);
+    overlay.setAttribute("role", "dialog"); overlay.setAttribute("aria-modal", "true"); overlay.setAttribute("aria-label", message);
     document.body.appendChild(overlay);
+    overlay.querySelector("button").focus();
   });
 }
 </script>

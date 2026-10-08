@@ -1,3 +1,4 @@
+import { withConversation } from "../lib/conversationLock";
 import axios from "axios";
 import { env } from "../config";
 import { prisma } from "../db/client";
@@ -124,9 +125,14 @@ export interface AgentReply {
  * de WhatsApp nunca debe ver un error técnico ni quedarse sin respuesta.
  */
 export async function handleIncomingMessage(ctx: AgentContext, userText: string): Promise<AgentReply> {
+  return withConversation(ctx.patientId, () => handleMessageLocked(ctx, userText));
+}
+async function handleMessageLocked(ctx: AgentContext, userText: string): Promise<AgentReply> {
   await saveMessage(ctx.patientId, "user", userText);
   await recordEvent("PATIENT_MESSAGE_RECEIVED", { patientId: ctx.patientId });
 
+  const patient = await prisma.patient.findUniqueOrThrow({ where: { id: ctx.patientId } });
+  if (patient.aiPaused) return { reply: "", handoffReason: patient.handoffReason || "Atención humana" };
   try {
     const result = await runAgentLoop(ctx, userText);
     await saveMessage(ctx.patientId, "assistant", result.reply);
@@ -166,7 +172,7 @@ async function runAgentLoop(ctx: AgentContext, userText: string): Promise<AgentR
         const input = call.function.arguments ? JSON.parse(call.function.arguments) : {};
         const result = await executeTool(call.function.name, input, ctx);
         resultText = result.text;
-        if (result.handoffReason) handoffReason = result.handoffReason;
+        if (result.handoffReason) return { reply: "He avisado al equipo del centro para que revise tu consulta. Si es urgente, llama directamente al centro.", handoffReason: result.handoffReason };
       } catch (err) {
         logger.error("tool_execution_failed", { tool: call.function.name, err });
         resultText = `ERROR: no se pudo ejecutar ${call.function.name} ahora mismo. Informa al paciente con naturalidad y sugiere reintentarlo.`;

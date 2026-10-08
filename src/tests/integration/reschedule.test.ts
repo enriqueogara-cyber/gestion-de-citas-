@@ -1,4 +1,4 @@
-import test, { before, beforeEach } from "node:test";
+import test, { before, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { DateTime } from "luxon";
 import { prisma } from "../../db/client";
@@ -14,8 +14,9 @@ function nextWeekday(target: number): DateTime {
   return d;
 }
 
+describe("reschedule.test.ts", () => {
 before(ensureCatalogReady);
-beforeEach(cleanTransactionalData);
+beforeEach(async () => { await cleanTransactionalData(); await makeProfessional("Profesional de prueba"); });
 
 // TEST 5 — reschedule correcto: vieja CANCELLED, nueva activa, evento correcto.
 test("TEST 5: reschedule exitoso cancela la vieja, activa la nueva y registra un único evento", async () => {
@@ -189,4 +190,6 @@ test("TEST 8: si además falla la propia compensación, se registra RESCHEDULE_I
   } finally {
     (prisma.appointment as any).updateMany = originalUpdateMany;
   }
+});
+
 });

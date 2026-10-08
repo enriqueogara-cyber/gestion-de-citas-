@@ -639,7 +639,7 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
       if (data.error) {
         addRow("system", data.error);
       } else {
-        addRow("assistant", data.reply);
+        if (data.reply) addRow("assistant", data.reply);
         if (data.handoffReason) {
           addRow("handoff", "Conversación derivada a atención humana — motivo: " + data.handoffReason);
         }

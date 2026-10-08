@@ -47,7 +47,9 @@ export async function getAvailability(
     ? { fromDate: onDate.startOf("day"), daysAhead: 1, maxSlots: FULL_PICTURE_CAP }
     : { daysAhead, maxSlots: FULL_PICTURE_CAP };
 
+  const eligible = await resolveServiceProfessionals(serviceId);
   if (professionalId) {
+    if (!eligible.professionals.some(p => p.id === professionalId)) return [];
     return findAvailableSlots(service, { ...baseOpts, professionalId });
   }
 
@@ -59,9 +61,7 @@ export async function getAvailability(
   // ocupado a las 12:00 pero Laura estaba libre, el sistema decía "no hay
   // hueco a las 12:00" y perdía una reserva posible de verdad.
   const resolved = await resolveServiceProfessionals(serviceId);
-  if (resolved.mode === "no-professionals-onboarded") {
-    return findAvailableSlots(service, baseOpts);
-  }
+
 
   // Hay profesionales dados de alta pero NINGUNO cualificado para este
   // servicio: no hay disponibilidad real, nunca "cualquiera puede" por
@@ -203,6 +203,7 @@ export async function rescheduleAppointment(params: {
     start: params.newStart,
     professionalId: params.newProfessionalId ?? old.professionalId ?? undefined,
     excludeAppointmentId: old.id,
+    recoveredFromWaitlist: old.recoveredFromWaitlist,
   });
 
   try {

@@ -1,5 +1,6 @@
 import { prisma } from "../db/client";
 import { clinicConfig } from "../config";
+import { IANAZone } from "luxon";
 
 /**
  * Identidad/branding del centro, con la base de datos como fuente de
@@ -27,7 +28,7 @@ export interface ClinicSettings {
 /** Devuelve la configuración del centro, sembrando la fila la primera vez. */
 export async function getClinicSettings(): Promise<ClinicSettings> {
   const existing = await prisma.clinic.findUnique({ where: { slug: DEFAULT_SLUG } });
-  if (existing) return existing;
+  if (existing) { clinicConfig.timezone = existing.timezone; return existing; }
 
   return prisma.clinic.create({
     data: {
@@ -55,7 +56,12 @@ export async function updateClinicSettings(
     data.brandColor = patch.brandColor;
   }
   if (patch.logoUrl !== undefined) data.logoUrl = patch.logoUrl.trim();
-  if (patch.timezone !== undefined && patch.timezone.trim()) data.timezone = patch.timezone.trim();
+  if (patch.timezone !== undefined && patch.timezone.trim()) {
+    if (!IANAZone.isValidZone(patch.timezone.trim())) throw new Error("Zona horaria inválida.");
+    data.timezone = patch.timezone.trim();
+  }
 
-  return prisma.clinic.update({ where: { slug: DEFAULT_SLUG }, data });
+  const updated = await prisma.clinic.update({ where: { slug: DEFAULT_SLUG }, data });
+  clinicConfig.timezone = updated.timezone;
+  return updated;
 }

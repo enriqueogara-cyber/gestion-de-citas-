@@ -4,6 +4,7 @@ import { prisma } from "../db/client";
 import { clinicConfig } from "../config";
 import { notifyPatient, notifyPatientTemplate } from "../notifications/notify";
 import { recordEvent } from "../services/auditLog";
+import { serviceLabel } from "../lib/labels";
 import { logger } from "../lib/logger";
 import { handleWaitlistOfferExpiredJob, cleanupExpiredSlotHolds } from "../services/waitlistOrchestrator";
 import { processDueJobs } from "./persistentJobs";
@@ -40,16 +41,16 @@ function formatWhen(date: Date): string {
  */
 async function handleReminder24hJob(appointmentId: string): Promise<void> {
   const appt = await prisma.appointment.findUnique({ where: { id: appointmentId }, include: { patient: true } });
-  if (!appt || appt.status !== "PENDING_CONFIRMATION") return; // cancelada/confirmada entre medias: nada que hacer
+  if (!appt || appt.reminder24hSentAt || appt.status !== "PENDING_CONFIRMATION") return;
 
   await notifyPatientTemplate(
     appt.patient,
-    `Hola ${appt.patient.name || ""}, te recordamos tu cita de ${appt.service} el ${formatWhen(appt.startsAt)}. ` +
+    `Hola ${appt.patient.name || ""}, te recordamos tu cita de ${serviceLabel(appt.service)} el ${formatWhen(appt.startsAt)}. ` +
       `Responde SI para confirmar o NO para cancelar y liberar el hueco.`,
     {
       name: "recordatorio_cita_24h",
       languageCode: "es",
-      bodyParams: [appt.patient.name || "", appt.service, formatWhen(appt.startsAt)],
+      bodyParams: [appt.patient.name || "", serviceLabel(appt.service), formatWhen(appt.startsAt)],
     }
   );
   await prisma.appointment.update({ where: { id: appt.id }, data: { reminder24hSentAt: new Date() } });
@@ -63,10 +64,10 @@ async function handleReminder24hJob(appointmentId: string): Promise<void> {
  */
 async function handleReminder2hJob(appointmentId: string): Promise<void> {
   const appt = await prisma.appointment.findUnique({ where: { id: appointmentId }, include: { patient: true } });
-  if (!appt || !["PENDING_CONFIRMATION", "CONFIRMED"].includes(appt.status)) return;
+  if (!appt || appt.reminder2hSentAt || !["PENDING_CONFIRMATION", "CONFIRMED"].includes(appt.status)) return;
 
   const hhmm = DateTime.fromJSDate(appt.startsAt).setZone(clinicConfig.timezone).toFormat("HH:mm");
-  const msg = `Te esperamos hoy a las ${hhmm} para ${appt.service}. Si al final no puedes venir, avísanos y liberamos el hueco para otro paciente.`;
+  const msg = `Te esperamos hoy a las ${hhmm} para ${serviceLabel(appt.service)}. Si al final no puedes venir, avísanos y liberamos el hueco para otro paciente.`;
   try {
     await notifyPatient(appt.patient, msg);
   } catch (err) {
@@ -74,47 +75,11 @@ async function handleReminder2hJob(appointmentId: string): Promise<void> {
     await notifyPatientTemplate(appt.patient, msg, {
       name: "recordatorio_cita_2h",
       languageCode: "es",
-      bodyParams: [appt.service, hhmm],
+      bodyParams: [serviceLabel(appt.service), hhmm],
     });
   }
   await prisma.appointment.update({ where: { id: appt.id }, data: { reminder2hSentAt: new Date() } });
   await recordEvent("REMINDER_SENT", { patientId: appt.patientId, appointmentId: appt.id, metadata: { kind: "2h" } });
-}
-
-/** Bookkeeping: citas que nunca se confirmaron y ya pasó su hora se marcan como no-show. */
-async function markPastNoShows() {
-  const stale = await prisma.appointment.findMany({
-    where: { status: "PENDING_CONFIRMATION", startsAt: { lt: new Date() } },
-    select: { id: true, patientId: true },
-  });
-  if (stale.length === 0) return;
-
-  await prisma.appointment.updateMany({
-    where: { id: { in: stale.map((a) => a.id) } },
-    data: { status: "NO_SHOW" },
-  });
-  for (const a of stale) {
-    await recordEvent("APPOINTMENT_NO_SHOW", { patientId: a.patientId, appointmentId: a.id });
-  }
-  logger.info("appointments_marked_no_show", { count: stale.length });
-}
-
-/** Bookkeeping: citas confirmadas cuya hora ya pasó se dan por completadas. */
-async function markPastCompletions() {
-  const stale = await prisma.appointment.findMany({
-    where: { status: "CONFIRMED", endsAt: { lt: new Date() } },
-    select: { id: true, patientId: true },
-  });
-  if (stale.length === 0) return;
-
-  await prisma.appointment.updateMany({
-    where: { id: { in: stale.map((a) => a.id) } },
-    data: { status: "COMPLETED" },
-  });
-  for (const a of stale) {
-    await recordEvent("APPOINTMENT_COMPLETED", { patientId: a.patientId, appointmentId: a.id });
-  }
-  logger.info("appointments_marked_completed", { count: stale.length });
 }
 
 async function runJobTick() {
@@ -137,12 +102,6 @@ export function startScheduler() {
   cron.schedule("* * * * *", () => {
     runJobTick().catch((err) => logger.error("job_tick_failed", { err }));
     cleanupExpiredSlotHolds().catch((err) => logger.error("cleanupExpiredSlotHolds_failed", { err }));
-  });
-
-  // Bookkeeping de estados (no-show/completada): cada 15 minutos es suficiente.
-  cron.schedule("*/15 * * * *", () => {
-    markPastNoShows().catch((err) => logger.error("markPastNoShows_failed", { err }));
-    markPastCompletions().catch((err) => logger.error("markPastCompletions_failed", { err }));
   });
 
   logger.info("scheduler_started", { jobsEveryMinutes: 1, bookkeepingEveryMinutes: 15 });

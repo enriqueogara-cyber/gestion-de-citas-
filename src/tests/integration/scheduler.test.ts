@@ -1,11 +1,11 @@
-import test, { before, beforeEach } from "node:test";
+import test, { before, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { DateTime } from "luxon";
 import { prisma } from "../../db/client";
 import { clinicConfig } from "../../config";
 import { bookAppointment, cancelAppointment } from "../../services/appointments";
 import { processDueJobs } from "../../scheduler/persistentJobs";
-import { ensureCatalogReady, makePatient, cleanTransactionalData } from "./setup";
+import { ensureCatalogReady, makeProfessional, makePatient, cleanTransactionalData } from "./setup";
 
 const tz = clinicConfig.timezone;
 
@@ -15,8 +15,9 @@ function nextWeekday(target: number): DateTime {
   return d;
 }
 
+describe("scheduler.test.ts", () => {
 before(ensureCatalogReady);
-beforeEach(cleanTransactionalData);
+beforeEach(async () => { await cleanTransactionalData(); await makeProfessional("Profesional de prueba"); });
 
 test("reservar una cita programa sus dos jobs de recordatorio (24h y 2h)", async () => {
   const patient = await makePatient("sched-1");
@@ -89,4 +90,6 @@ test("un job MUY vencido (fuera de la ventana razonable) se cancela en vez de pr
   assert.equal(handled, false, "no debería enviarse un recordatorio de 2h con 3h de retraso");
   const job = await prisma.scheduledJob.findFirstOrThrow({ where: { appointmentId: appt.id, type: "REMINDER_2H" } });
   assert.equal(job.status, "CANCELLED");
+});
+
 });

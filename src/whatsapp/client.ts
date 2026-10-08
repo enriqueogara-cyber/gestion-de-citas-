@@ -27,7 +27,7 @@ export async function sendText(toPhoneE164: string, body: string): Promise<void>
       type: "text",
       text: { body, preview_url: false },
     },
-    { headers: authHeaders() }
+    { headers: authHeaders(), timeout: 30_000 }
   );
 }
 
@@ -64,7 +64,7 @@ export async function sendTemplate(
         ],
       },
     },
-    { headers: authHeaders() }
+    { headers: authHeaders(), timeout: 30_000 }
   );
 }
 
@@ -77,6 +77,6 @@ export async function markAsRead(messageId: string): Promise<void> {
       status: "read",
       message_id: messageId,
     },
-    { headers: authHeaders() }
+    { headers: authHeaders(), timeout: 30_000 }
   );
 }

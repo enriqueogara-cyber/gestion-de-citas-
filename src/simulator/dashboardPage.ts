@@ -99,8 +99,8 @@ export interface AgendaRow {
 
 const ATTENTION_LABEL: Record<string, string> = {
   HUMAN_HANDOFF_REQUESTED: "Derivado a atención humana",
-  RESCHEDULE_INCONSISTENT: "Reschedule requiere revisión manual",
-  SCHEDULED_JOB_FAILED: "Job programado fallido",
+  RESCHEDULE_INCONSISTENT: "Cambio de cita pendiente de revisión",
+  SCHEDULED_JOB_FAILED: "Recordatorio u oferta pendiente de revisión",
   CALENDAR_SYNC_FAILED: "Fallo sincronizando calendario",
 };
 
@@ -206,11 +206,12 @@ export function renderDashboardPage(
 
   const body = `
   <section class="hero-kpi">
-    <div class="hero-kpi-label">${icon("calendar", { size: 12 })} Ingresos recuperados</div>
+    <div class="hero-kpi-label">${icon("calendar", { size: 12 })} Valor de reservas recuperadas</div>
     <div class="hero-kpi-value">${stats.recoveredRevenueEur.toLocaleString("es-ES", { minimumFractionDigits: 0 })} €</div>
-    <p class="hero-kpi-sub">Gracias a citas recuperadas automáticamente por la lista de espera</p>
+    <p class="hero-kpi-sub">Este mes · Reservas recuperadas que siguen activas o se han atendido. No equivale a cobros.</p>
   </section>
 
+  <section class="panel"><p>${stats.pendingAttendance} citas pendientes de registrar asistencia.</p><p>Citas recuperadas atendidas: <strong>${stats.recoveredAttended}</strong> · Valor atendido: <strong>${stats.recoveredAttendedValueEur.toLocaleString("es-ES")} €</strong> · Cobros registrados: <strong>${stats.recoveredPaidEur.toLocaleString("es-ES")} €</strong></p><a class="btn btn-primary" href="/simulator/operations">Abrir recepción y elegir periodo</a></section>
   <section class="stat-strip">
     <div class="stat-cell tone-brand"><span class="stat-icon">${icon("calendar", { size: 13 })}</span><div class="stat-value">${stats.recoveredSlots}</div><div class="stat-label">Huecos recuperados</div></div>
     <div class="stat-cell tone-success"><span class="stat-icon">${icon("check-circle", { size: 13 })}</span><div class="stat-value">${Math.round(stats.confirmationRate * 100)}%</div><div class="stat-label">Citas confirmadas</div></div>
@@ -243,7 +244,7 @@ export function renderDashboardPage(
     </div>
     <p class="muted">No existirían así de cara al paciente real — son atajos para demostrar el flujo completo sin esperar a que pase de verdad.</p>
     <div class="demo-actions">
-      <button class="btn btn-primary btn-sm" id="btnRecover">${icon("play", { size: 13 })} Ejecutar demo: recuperar hueco${demoPrice ? ` (${demoPrice})` : ""}</button>
+      <button class="btn btn-primary btn-sm" id="btnRecover" ${!demoService.id ? "disabled" : ""}>${icon("play", { size: 13 })} Ejecutar demo: recuperar hueco${demoPrice ? ` (${demoPrice})` : ""}</button>
       <button class="btn btn-ghost btn-sm" id="btnSeed">${icon("seed", { size: 13 })} Sembrar datos de ejemplo</button>
       <button class="btn btn-danger-ghost btn-sm" id="btnReset">${icon("trash", { size: 13 })} Reiniciar datos de demo</button>
     </div>
@@ -429,9 +430,9 @@ export function renderDashboardPage(
   });
 
   document.getElementById("btnReset").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
     const ok = await confirmDialog("¿Borrar todos los datos de demo (pacientes demo-*, citas, listas, actividad)?", "Reiniciar");
     if (!ok) return;
-    const btn = e.currentTarget;
     setBusy(btn, true);
     try {
       const res = await fetch("/simulator/api/demo/reset-all", { method: "POST" });

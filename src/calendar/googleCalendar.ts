@@ -73,6 +73,11 @@ export async function findAvailableSlots(
   const rangeEnd = rangeStart.plus({ days: daysAhead });
 
   const busy = await getBusyIntervals(rangeStart, rangeEnd);
+  const { prisma } = await import("../db/client");
+  const local = await prisma.appointment.findMany({ where: { status: { in: ["PENDING_CONFIRMATION", "CONFIRMED", "ARRIVED"] }, startsAt: { lt: rangeEnd.toJSDate() }, endsAt: { gt: rangeStart.toJSDate() }, ...(opts.professionalId ? { professionalId: opts.professionalId } : {}) } });
+  const blocks = await prisma.availabilityBlock.findMany({ where: { startsAt: { lt: rangeEnd.toJSDate() }, endsAt: { gt: rangeStart.toJSDate() }, ...(opts.professionalId ? { OR: [{ professionalId: null }, { professionalId: opts.professionalId }] } : {}) } });
+  const holds = await prisma.slotHold.findMany({ where: { expiresAt: { gt: new Date() }, startsAt: { lt: rangeEnd.toJSDate() }, endsAt: { gt: rangeStart.toJSDate() }, ...(opts.professionalId ? { OR: [{ professionalId: null }, { professionalId: opts.professionalId }] } : {}) } });
+  busy.push(...[...local, ...blocks, ...holds].map(r => ({ start: DateTime.fromJSDate(r.startsAt), end: DateTime.fromJSDate(r.endsAt) })));
   return computeSlotsFromBusy(service, busy, opts);
 }
 

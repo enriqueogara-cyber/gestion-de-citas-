@@ -22,10 +22,13 @@ for (const p of [testDbPath, testDbPath + "-journal"]) {
   if (fs.existsSync(p)) fs.unlinkSync(p);
 }
 
+fs.writeFileSync(testDbPath, "");
+
 const env = {
   ...process.env,
   DATABASE_URL: "file:./test.db",
   NODE_ENV: "test",
+  RUST_LOG: "info",
   // Módulos que exigen esto de forma perezosa (env.openRouterApiKey()) no
   // se llaman en los integration tests (no hay llamadas reales al LLM),
   // pero algún import en cascada podría instanciar config.ts igualmente.

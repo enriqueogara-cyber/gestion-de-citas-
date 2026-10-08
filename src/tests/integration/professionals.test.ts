@@ -1,4 +1,4 @@
-import test, { before, beforeEach } from "node:test";
+import test, { before, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { DateTime } from "luxon";
 import { prisma } from "../../db/client";
@@ -16,6 +16,7 @@ function nextWeekday(target: number): DateTime {
   return d;
 }
 
+describe("professionals.test.ts", () => {
 before(ensureCatalogReady);
 beforeEach(cleanTransactionalData);
 
@@ -52,4 +53,6 @@ test("Dar de baja a un profesional no borra ni desvincula sus citas históricas"
   const stillLinked = await prisma.appointment.findUniqueOrThrow({ where: { id: appt.id }, include: { professional: true } });
   assert.equal(stillLinked.professionalId, laura.id);
   assert.equal(stillLinked.professional?.name, "Laura");
+});
+
 });

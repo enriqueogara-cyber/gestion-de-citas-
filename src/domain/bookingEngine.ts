@@ -72,7 +72,7 @@ export class SlotTakenError extends Error {
   }
 }
 
-const ACTIVE_APPOINTMENT_STATUSES = ["PENDING_CONFIRMATION", "CONFIRMED"];
+const ACTIVE_APPOINTMENT_STATUSES = ["PENDING_CONFIRMATION", "CONFIRMED", "ARRIVED"];
 
 async function isDbSlotFree(
   tx: Prisma.TransactionClient,
@@ -87,11 +87,13 @@ async function isDbSlotFree(
       status: { in: ACTIVE_APPOINTMENT_STATUSES },
       startsAt: { lt: end.toJSDate() },
       endsAt: { gt: start.toJSDate() },
-      ...(professionalId ? { professionalId } : {}),
+      ...(professionalId ? { OR: [{ professionalId }, { professionalId: null }] } : {}),
       ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
     },
   });
   if (overlappingAppt > 0) return false;
+  const block = await tx.availabilityBlock.count({ where: { clinicId: "default", startsAt: { lt: end.toJSDate() }, endsAt: { gt: start.toJSDate() }, OR: [{ professionalId: null }, { professionalId }] } });
+  if (block) return false;
 
   // Holds activos (huecos "apalabrados" con alguien de la lista de espera,
   // ver waitlistOrchestrator) también cuentan como ocupado para cualquiera
@@ -102,7 +104,7 @@ async function isDbSlotFree(
       endsAt: { gt: start.toJSDate() },
       expiresAt: { gt: new Date() },
       patientId: { not: excludePatientId },
-      ...(professionalId ? { professionalId } : {}),
+      ...(professionalId ? { OR: [{ professionalId }, { professionalId: null }] } : {}),
     },
   });
   return overlappingHold === 0;
@@ -110,7 +112,7 @@ async function isDbSlotFree(
 
 async function resolveFreeProfessional(
   tx: Prisma.TransactionClient,
-  candidates: Professional[] | "none-configured",
+  candidates: Professional[],
   requestedProfessional: Professional | null,
   start: DateTime,
   end: DateTime,
@@ -120,13 +122,6 @@ async function resolveFreeProfessional(
   if (requestedProfessional) {
     const free = await isDbSlotFree(tx, start, end, requestedProfessional.id, patientId, excludeAppointmentId);
     return free ? { ok: true, professionalId: requestedProfessional.id } : { ok: false };
-  }
-
-  if (candidates === "none-configured") {
-    // Sin profesionales dados de alta: el centro se trata como un único
-    // recurso (comportamiento equivalente al MVP original).
-    const free = await isDbSlotFree(tx, start, end, null, patientId, excludeAppointmentId);
-    return free ? { ok: true, professionalId: null } : { ok: false };
   }
 
   for (const p of candidates) {
@@ -160,9 +155,8 @@ export interface BookingRequest {
  * transacciones de escritura se serializan, así que dos reservas
  * concurrentes para el mismo hueco no pueden colarse las dos — la segunda
  * encuentra el hueco ya ocupado dentro de su propia transacción y falla
- * con SlotTakenError. (Con Postgres, el mismo código sigue siendo correcto
- * gracias a los índices + el propio aislamiento de transacción; no hace
- * falta cambiar nada al migrar.)
+ * con SlotTakenError. Para migrar a Postgres hay que revisar el aislamiento y añadir
+ * protección de solapamientos; un índice normal no evita dobles reservas.
  */
 export async function reserveAppointment(req: BookingRequest) {
   const service = getService(req.serviceId);
@@ -218,13 +212,15 @@ export async function reserveAppointment(req: BookingRequest) {
       throw new BookingValidationError("Ese profesional no existe o no realiza este servicio.", "PROFESSIONAL_NOT_AVAILABLE");
     }
   }
-  const candidates: Professional[] | "none-configured" =
-    resolved.mode === "no-professionals-onboarded" ? "none-configured" : qualifiedList;
+  const candidates = qualifiedList;
 
   const appointment = await prisma.$transaction(async (tx) => {
+    const eligibleNow = await tx.professional.findMany({ where: { clinicId: "default", active: true, id: { in: candidates.map(p => p.id) } } });
+    const stillQualified = eligibleNow.filter(p => { try { return JSON.parse(p.serviceIds).includes(req.serviceId); } catch { return false; } });
+    if (!stillQualified.length || (requestedProfessional && !stillQualified.some(p => p.id === requestedProfessional!.id))) throw new BookingValidationError("No hay un profesional elegible para ese servicio.", "PROFESSIONAL_NOT_AVAILABLE");
     const resolved = await resolveFreeProfessional(
       tx,
-      candidates,
+      stillQualified,
       requestedProfessional,
       req.start,
       end,
@@ -254,6 +250,8 @@ export async function reserveAppointment(req: BookingRequest) {
       });
     }
 
+    // Reserva y recordatorios se guardan juntos: nunca queda una cita sin jobs.
+    await scheduleReminderJobs(created, tx);
     return created;
   });
 
@@ -299,7 +297,7 @@ export async function reserveAppointment(req: BookingRequest) {
   // Programa los recordatorios 24h/2h como jobs persistentes (ver
   // scheduler/persistentJobs.ts) — sobreviven a un reinicio del proceso,
   // a diferencia de depender solo de un cron en memoria.
-  await scheduleReminderJobs(appointment);
+
 
   return appointment;
 }

@@ -20,14 +20,16 @@ export function servicePriceEur(serviceId: string): number | null {
 }
 
 export const APPOINTMENT_STATUS_LABEL: Record<string, string> = {
+  ARRIVED: "En el centro",
   CONFIRMED: "Confirmada",
   PENDING_CONFIRMATION: "Pendiente de confirmar",
   CANCELLED: "Cancelada",
   COMPLETED: "Completada",
-  NO_SHOW: "No-show",
+  NO_SHOW: "No ha acudido",
 };
 
 export const APPOINTMENT_STATUS_BADGE_CLASS: Record<string, string> = {
+  ARRIVED: "badge-confirmed",
   CONFIRMED: "badge-confirmed",
   PENDING_CONFIRMATION: "badge-pending",
   CANCELLED: "badge-cancelled",
@@ -44,6 +46,11 @@ export const APPOINTMENT_STATUS_BADGE_CLASS: Record<string, string> = {
  * color (severidad) los da el CSS de cada pantalla, no un emoji por tipo.
  */
 export const AUDIT_EVENT_LABEL: Record<string, string> = {
+  APPOINTMENT_ARRIVED: "Paciente en el centro",
+  PAYMENT_RECORDED: "Cobro registrado",
+  HUMAN_HANDOFF_CLAIMED: "Conversación asignada al equipo",
+  HUMAN_HANDOFF_RESOLVED: "Conversación devuelta al asistente",
+  HUMAN_REPLY_SENT: "Respuesta del equipo enviada",
   PATIENT_MESSAGE_RECEIVED: "Mensaje recibido",
   AI_TOOL_CALLED: "Acción del agente",
   AVAILABILITY_CHECKED: "Consultó disponibilidad",
@@ -52,7 +59,7 @@ export const AUDIT_EVENT_LABEL: Record<string, string> = {
   APPOINTMENT_CONFIRMED: "Cita confirmada",
   APPOINTMENT_CANCELLED: "Cita cancelada",
   APPOINTMENT_COMPLETED: "Cita completada",
-  APPOINTMENT_NO_SHOW: "No-show",
+  APPOINTMENT_NO_SHOW: "Paciente ausente",
   WAITLIST_JOINED: "Apuntado a lista de espera",
   WAITLIST_OFFER_CREATED: "Oferta enviada a lista de espera",
   WAITLIST_OFFER_ACCEPTED: "Oferta aceptada",

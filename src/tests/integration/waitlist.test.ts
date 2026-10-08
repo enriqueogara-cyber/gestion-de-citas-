@@ -1,4 +1,4 @@
-import test, { before, beforeEach } from "node:test";
+import test, { before, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { DateTime } from "luxon";
 import { prisma } from "../../db/client";
@@ -28,8 +28,9 @@ function nextWeekday(target: number): DateTime {
   return d;
 }
 
+describe("waitlist.test.ts", () => {
 before(ensureCatalogReady);
-beforeEach(cleanTransactionalData);
+beforeEach(async () => { await cleanTransactionalData(); await makeProfessional("Profesional de prueba"); });
 
 test("cancelar una cita ofrece el hueco al primero compatible en lista de espera, y aceptar lo convierte en cita real", async () => {
   const laura = await makeProfessional("Laura", ["limpieza"]);
@@ -161,4 +162,6 @@ test("el escenario de demo 'recuperar hueco' ejecutado dos veces no duplica cita
   // Y no debe quedar ninguna cita "fantasma" de la primera ejecución.
   const staleFirstAppt = await prisma.appointment.findUnique({ where: { id: first.newAppointmentId } });
   assert.equal(staleFirstAppt, null, "la cita de la 1ª ejecución se limpia al volver a correr el escenario");
+});
+
 });

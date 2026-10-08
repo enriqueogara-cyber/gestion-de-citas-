@@ -18,7 +18,7 @@ export async function ensureCatalogReady(): Promise<void> {
   ready = true;
 }
 
-export async function makeProfessional(name: string, serviceSlugs: string[] = []) {
+export async function makeProfessional(name: string, serviceSlugs: string[] = ["consulta_general", "limpieza", "revision"]) {
   return prisma.professional.create({ data: { name, serviceIds: JSON.stringify(serviceSlugs) } });
 }
 
@@ -34,6 +34,10 @@ export async function makePatient(phoneSuffix: string, name = "Test") {
 
 /** Borra todo lo transaccional (no toca Service/OpeningHoursRule/Clinic, que son el catálogo compartido entre tests). */
 export async function cleanTransactionalData(): Promise<void> {
+  await prisma.staffSession.deleteMany({});
+  await prisma.staffUser.deleteMany({});
+  await prisma.inboundMessage.deleteMany({});
+  await prisma.availabilityBlock.deleteMany({});
   await prisma.conversationMessage.deleteMany({});
   await prisma.waitlistEntry.deleteMany({});
   await prisma.slotHold.deleteMany({});

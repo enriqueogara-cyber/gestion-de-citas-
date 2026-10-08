@@ -1,3 +1,4 @@
+import { requestHandoff } from "../services/reception";
 import { DateTime } from "luxon";
 import { z } from "zod";
 import { getServicesSync } from "../services/serviceCatalog";
@@ -268,9 +269,7 @@ export async function executeTool(toolName: string, rawInput: any, ctx: AgentCon
         throw err;
       }
       const resolved = await resolveServiceProfessionals(input.service_id);
-      if (resolved.mode === "no-professionals-onboarded") {
-        return { text: "OK: no hay profesionales específicos, cualquiera del centro puede atender ese servicio." };
-      }
+
       if (resolved.professionals.length === 0) {
         return { text: "OK: ahora mismo no hay ningún profesional disponible para ese servicio." };
       }
@@ -425,7 +424,7 @@ export async function executeTool(toolName: string, rawInput: any, ctx: AgentCon
     }
 
     case "request_human_handoff": {
-      await recordEvent("HUMAN_HANDOFF_REQUESTED", { patientId: ctx.patientId, metadata: { reason: input.reason } });
+      await requestHandoff(ctx.patientId, input.reason);
       return {
         text: "OK: derivado a atención humana. Dile al paciente que el centro se pondrá en contacto con él/ella personalmente.",
         handoffReason: input.reason,

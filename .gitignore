@@ -4,3 +4,6 @@ dist/
 *.db
 *.db-journal
 google-service-account.json
+
+backups/
+playwright-report/

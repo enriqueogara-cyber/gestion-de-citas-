@@ -14,3 +14,4 @@ import "./scheduler.test";
 import "./waitlist.test";
 import "./settings.test";
 import "./serviceProfessionalRule.test";
+import "./reception.test";

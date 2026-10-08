@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { asyncRouter } from "../lib/asyncRouter";
 import { prisma } from "../db/client";
 import { findOrCreatePatient } from "../services/patients";
 import { handleIncomingMessage } from "../agent/claude";
@@ -19,6 +20,7 @@ import {
   setProfessionalServices,
 } from "../services/professionals";
 import {
+  getServicesSync,
   getAllServicesSync,
   createService,
   updateService,
@@ -36,7 +38,7 @@ import { rateLimit } from "../lib/rateLimit";
 import { serviceLabel, AUDIT_EVENT_LABEL, APPOINTMENT_STATUS_LABEL } from "../lib/labels";
 import { formatLong } from "../lib/dates";
 
-export const simulatorRouter = Router();
+export const simulatorRouter = asyncRouter();
 
 // Ver lib/rateLimit.ts. Dos perfiles: uno para lo que llama al LLM (más
 // caro, tanto en latencia como en coste real), otro para mutaciones en
@@ -89,7 +91,7 @@ simulatorRouter.get("/dashboard", async (_req: Request, res: Response) => {
     reason: typeof e.metadata.reason === "string" ? e.metadata.reason : null,
     createdAt: e.createdAt,
   }));
-  const demoService = getRecoverySlotDemoService();
+  const demoService = getServicesSync().length ? getRecoverySlotDemoService() : { id: "", label: "Sin servicios", durationMinutes: 0 };
   res.type("html").send(renderDashboardPage(settings, stats, events, agenda, demoService, attention, llmStats));
 });
 
@@ -316,11 +318,7 @@ simulatorRouter.post("/api/reset", mutationRateLimit, async (req: Request, res: 
 
   const patient = await prisma.patient.findUnique({ where: { phone: demoPhone(sessionId) } });
   if (patient) {
-    // Orden por claves foráneas: mensajes/citas/lista de espera antes que el paciente.
     await prisma.conversationMessage.deleteMany({ where: { patientId: patient.id } });
-    await prisma.waitlistEntry.deleteMany({ where: { patientId: patient.id } });
-    await prisma.appointment.deleteMany({ where: { patientId: patient.id } });
-    await prisma.patient.delete({ where: { id: patient.id } });
   }
   res.json({ ok: true });
 });
@@ -333,7 +331,7 @@ simulatorRouter.post("/api/reset", mutationRateLimit, async (req: Request, res: 
 
 simulatorRouter.post("/api/demo/seed", mutationRateLimit, async (_req: Request, res: Response) => {
   try {
-    res.json(await singleFlight("demo:seed", seedDemoData));
+    res.json(await singleFlight("demo:mutation", seedDemoData));
   } catch (err: any) {
     const status = err instanceof AlreadyRunningError ? 409 : 500;
     res.status(status).json({ error: err?.message || "No se pudo sembrar la demo." });
@@ -342,7 +340,7 @@ simulatorRouter.post("/api/demo/seed", mutationRateLimit, async (_req: Request, 
 
 simulatorRouter.post("/api/demo/reset-all", mutationRateLimit, async (_req: Request, res: Response) => {
   try {
-    await singleFlight("demo:reset-all", resetAllDemoData);
+    await singleFlight("demo:mutation", resetAllDemoData);
     res.json({ ok: true });
   } catch (err: any) {
     const status = err instanceof AlreadyRunningError ? 409 : 500;
@@ -352,7 +350,7 @@ simulatorRouter.post("/api/demo/reset-all", mutationRateLimit, async (_req: Requ
 
 simulatorRouter.post("/api/demo/recover-slot-scenario", mutationRateLimit, async (_req: Request, res: Response) => {
   try {
-    res.json(await singleFlight("demo:recover-slot-scenario", runRecoverSlotScenario));
+    res.json(await singleFlight("demo:mutation", runRecoverSlotScenario));
   } catch (err: any) {
     const status = err instanceof AlreadyRunningError ? 409 : 500;
     res.status(status).json({ error: err?.message || "No se pudo ejecutar el escenario." });

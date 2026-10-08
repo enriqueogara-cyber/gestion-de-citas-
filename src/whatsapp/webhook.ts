@@ -1,60 +1,26 @@
-import { Router, Request, Response } from "express";
+import { Router } from "express";
 import { env } from "../config";
-import { markAsRead, sendText } from "./client";
-import { findOrCreatePatient } from "../services/patients";
-import { handleIncomingMessage } from "../agent/claude";
+import { validWebhookSignature } from "../services/staffAuth";
+import { enqueueMessage, processInbox } from "./inbox";
 import { logger } from "../lib/logger";
-
 export const whatsappWebhookRouter = Router();
-
-// --- Verificación del webhook (Meta la llama una vez al configurar la URL) ---
-whatsappWebhookRouter.get("/webhook", (req: Request, res: Response) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === env.whatsappVerifyToken) {
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
-  }
+whatsappWebhookRouter.get("/webhook", (req, res) => {
+  if (env.whatsappVerifyToken && req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === env.whatsappVerifyToken) res.status(200).send(req.query["hub.challenge"]);
+  else res.sendStatus(403);
 });
-
-// --- Recepción de mensajes ---
-whatsappWebhookRouter.post("/webhook", async (req: Request, res: Response) => {
-  // Respondemos 200 de inmediato: Meta reintenta si no contestamos rápido,
-  // y no queremos duplicados si Claude tarda unos segundos en responder.
-  res.sendStatus(200);
-
+whatsappWebhookRouter.post("/webhook", async (req, res, next) => {
+  const raw = (req as typeof req & { rawBody?: Buffer }).rawBody;
+  if (!raw || !validWebhookSignature(raw, req.get("X-Hub-Signature-256"), process.env.WHATSAPP_APP_SECRET || "")) { res.sendStatus(403); return; }
   try {
-    const entries = req.body?.entry || [];
-    for (const entry of entries) {
-      for (const change of entry.changes || []) {
-        const value = change.value;
-        const messages = value?.messages || [];
-        const contacts = value?.contacts || [];
-
-        for (const message of messages) {
-          if (message.type !== "text") continue; // MVP: solo texto libre
-
-          const phone: string = message.from; // ya viene en formato E.164 sin "+"
-          const text: string = message.text?.body ?? "";
-          const contactName: string | undefined = contacts.find(
-            (c: any) => c.wa_id === phone
-          )?.profile?.name;
-
-          markAsRead(message.id).catch(() => {});
-
-          const patient = await findOrCreatePatient(phone, contactName);
-          const result = await handleIncomingMessage(
-            { patientId: patient.id, phone: patient.phone, name: patient.name || "" },
-            text
-          );
-          await sendText(phone, result.reply);
-        }
+    for (const entry of req.body?.entry || []) for (const change of entry.changes || []) {
+      const value = change.value;
+      for (const message of value?.messages || []) {
+        if (message.type !== "text") continue;
+        if (typeof message.id !== "string" || !/^\d{7,15}$/.test(message.from) || typeof message.text?.body !== "string") { res.sendStatus(400); return; }
+        await enqueueMessage({ id: message.id, phone: message.from, name: value.contacts?.find((c: any) => c.wa_id === message.from)?.profile?.name, text: message.text.body });
       }
     }
-  } catch (err) {
-    logger.error("whatsapp_webhook_failed", { err });
-  }
+    res.sendStatus(200);
+    void processInbox().catch(() => logger.error("inbox_tick_failed"));
+  } catch (err) { next(err); }
 });

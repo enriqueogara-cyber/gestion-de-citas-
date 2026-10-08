@@ -1,4 +1,4 @@
-import test, { before, beforeEach } from "node:test";
+import test, { before, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { DateTime } from "luxon";
 import { clinicConfig } from "../../config";
@@ -25,6 +25,7 @@ function nextWeekday(target: number): DateTime {
   return d;
 }
 
+describe("serviceProfessionalRule.test.ts", () => {
 before(ensureCatalogReady);
 beforeEach(cleanTransactionalData);
 
@@ -124,15 +125,10 @@ test("Caso E: professionalId incompatible pedido explícitamente -> el backend l
 // Complementario — modo MVP legítimo: si el centro no tiene NINGÚN
 // profesional dado de alta, el servicio SIGUE siendo reservable (recurso
 // único), no se activa el rechazo del Caso A.
-test("Sin ningún profesional dado de alta en el centro (modo MVP): el servicio sigue siendo reservable", async () => {
-  const resolved = await resolveServiceProfessionals("revision");
-  assert.equal(resolved.mode, "no-professionals-onboarded");
-
+test("Sin profesionales, una reserva se rechaza y no se ofrecen huecos", async () => {
+  const patient = await makePatient("rule-none");
   const monday = nextWeekday(1).set({ hour: 10, minute: 0 });
-  const slots = await getAvailability("revision", 10);
-  assert.ok(slots.some((s) => s.toMillis() === monday.toMillis()));
-
-  const patient = await makePatient("rule-mvp");
-  const appt = await bookAppointment({ patientId: patient.id, patientName: "X", patientPhone: patient.phone, serviceId: "revision", start: monday });
-  assert.equal(appt.professionalId, null);
+  assert.deepEqual(await getAvailability("revision", 10), []);
+  await assert.rejects(() => bookAppointment({ patientId: patient.id, patientName: "X", patientPhone: patient.phone, serviceId: "revision", start: monday }), (err) => err instanceof BookingValidationError && err.code === "PROFESSIONAL_NOT_AVAILABLE");
+});
 });

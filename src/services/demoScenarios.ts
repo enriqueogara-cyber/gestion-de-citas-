@@ -97,17 +97,18 @@ export async function resetAllDemoData(): Promise<void> {
   const demoPatients = await prisma.patient.findMany({ where: { phone: { startsWith: "demo-" } } });
   const ids = demoPatients.map((p) => p.id);
 
-  if (ids.length > 0) {
-    await prisma.conversationMessage.deleteMany({ where: { patientId: { in: ids } } });
-    await prisma.waitlistEntry.deleteMany({ where: { patientId: { in: ids } } });
-    await prisma.appointment.deleteMany({ where: { patientId: { in: ids } } });
-    await prisma.auditLog.deleteMany({ where: { patientId: { in: ids } } });
-    await prisma.slotHold.deleteMany({ where: { patientId: { in: ids } } });
-    await prisma.patient.deleteMany({ where: { id: { in: ids } } });
-  }
-  // El resto del event feed (si queda algo sin patientId) también se limpia
-  // para que la demo arranque con un feed en blanco.
-  await prisma.auditLog.deleteMany({});
+  if (!ids.length) return;
+  await prisma.$transaction(async tx => {
+    const appointments = await tx.appointment.findMany({ where: { patientId: { in: ids } }, select: { id: true } });
+    const waitlist = await tx.waitlistEntry.findMany({ where: { patientId: { in: ids } }, select: { id: true } });
+    await tx.scheduledJob.deleteMany({ where: { OR: [{ appointmentId: { in: appointments.map(a => a.id) } }, { waitlistEntryId: { in: waitlist.map(w => w.id) } }] } });
+    await tx.conversationMessage.deleteMany({ where: { patientId: { in: ids } } });
+    await tx.slotHold.deleteMany({ where: { patientId: { in: ids } } });
+    await tx.waitlistEntry.deleteMany({ where: { patientId: { in: ids } } });
+    await tx.auditLog.deleteMany({ where: { OR: [{ patientId: { in: ids } }, { appointmentId: { in: appointments.map(a => a.id) } }] } });
+    await tx.appointment.deleteMany({ where: { patientId: { in: ids } } });
+    await tx.patient.deleteMany({ where: { id: { in: ids } } });
+  });
 }
 
 export interface RecoverSlotScenarioResult {
@@ -127,6 +128,7 @@ export interface RecoverSlotScenarioResult {
  * botón en vez de un número hardcodeado que se puede desincronizar.
  */
 export function getRecoverySlotDemoService() {
+  if (!getServicesSync().length) throw new Error("Configura al menos un servicio activo para ejecutar la demo.");
   return getServicesSync().reduce((best, s) =>
     (s.priceEur ?? -1) > (best.priceEur ?? -1) ? s : best
   );
@@ -146,9 +148,15 @@ export async function runRecoverSlotScenario(): Promise<RecoverSlotScenarioResul
   const lucia = await findOrCreatePatient(`${DEMO_PHONE_PREFIX}lucia`, "Lucía");
 
   // Limpiamos cualquier resto de una ejecución anterior del escenario.
-  await prisma.appointment.deleteMany({ where: { patientId: { in: [marta.id, lucia.id] } } });
-  await prisma.waitlistEntry.deleteMany({ where: { patientId: { in: [marta.id, lucia.id] } } });
-  await prisma.slotHold.deleteMany({ where: { patientId: { in: [marta.id, lucia.id] } } });
+  await prisma.$transaction(async tx => {
+    const patientIds = [marta.id, lucia.id];
+    const appointments = await tx.appointment.findMany({ where: { patientId: { in: patientIds } }, select: { id: true } });
+    const waitlist = await tx.waitlistEntry.findMany({ where: { patientId: { in: patientIds } }, select: { id: true } });
+    await tx.scheduledJob.deleteMany({ where: { OR: [{ appointmentId: { in: appointments.map(a => a.id) } }, { waitlistEntryId: { in: waitlist.map(w => w.id) } }] } });
+    await tx.slotHold.deleteMany({ where: { patientId: { in: patientIds } } });
+    await tx.waitlistEntry.deleteMany({ where: { patientId: { in: patientIds } } });
+    await tx.appointment.deleteMany({ where: { patientId: { in: patientIds } } });
+  });
 
   const slots = await getAvailability(service.id, 14);
   const slotStart = slots[0];

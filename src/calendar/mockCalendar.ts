@@ -24,13 +24,15 @@ async function getBusyIntervals(
 ): Promise<BusyInterval[]> {
   const rows = await prisma.appointment.findMany({
     where: {
-      status: { in: ["PENDING_CONFIRMATION", "CONFIRMED"] },
+      status: { in: ["PENDING_CONFIRMATION", "CONFIRMED", "ARRIVED"] },
       startsAt: { lt: to.toJSDate() },
       endsAt: { gt: from.toJSDate() },
-      ...(professionalId ? { professionalId } : {}),
+      ...(professionalId ? { OR: [{ professionalId }, { professionalId: null }] } : {}),
     },
   });
-  return rows.map((r) => ({
+  const blocks = await prisma.availabilityBlock.findMany({ where: { clinicId: "default", startsAt: { lt: to.toJSDate() }, endsAt: { gt: from.toJSDate() }, ...(professionalId ? { OR: [{ professionalId: null }, { professionalId }] } : {}) } });
+  const holds = await prisma.slotHold.findMany({ where: { startsAt: { lt: to.toJSDate() }, endsAt: { gt: from.toJSDate() }, expiresAt: { gt: new Date() }, ...(professionalId ? { OR: [{ professionalId: null }, { professionalId }] } : {}) } });
+  return [...rows, ...blocks, ...holds].map((r) => ({
     start: DateTime.fromJSDate(r.startsAt),
     end: DateTime.fromJSDate(r.endsAt),
   }));

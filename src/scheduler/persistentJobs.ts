@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { DateTime } from "luxon";
 import { prisma } from "../db/client";
 import { logger } from "../lib/logger";
@@ -44,8 +46,8 @@ async function scheduleJob(params: {
   appointmentId?: string;
   waitlistEntryId?: string;
   idempotencyKey: string;
-}): Promise<void> {
-  await prisma.scheduledJob.upsert({
+}, db: Prisma.TransactionClient = prisma): Promise<void> {
+  await db.scheduledJob.upsert({
     where: { idempotencyKey: params.idempotencyKey },
     update: {}, // ya existe: no lo tocamos, es idempotente a propósito
     create: {
@@ -59,7 +61,7 @@ async function scheduleJob(params: {
 }
 
 /** Al crear una cita: programa sus dos recordatorios. Se llama desde domain/bookingEngine.ts. */
-export async function scheduleReminderJobs(appointment: { id: string; startsAt: Date }): Promise<void> {
+export async function scheduleReminderJobs(appointment: { id: string; startsAt: Date }, db: Prisma.TransactionClient = prisma): Promise<void> {
   const start = DateTime.fromJSDate(appointment.startsAt);
   await Promise.all([
     scheduleJob({
@@ -67,13 +69,13 @@ export async function scheduleReminderJobs(appointment: { id: string; startsAt: 
       scheduledAt: start.minus({ hours: 24 }).toJSDate(),
       appointmentId: appointment.id,
       idempotencyKey: `reminder24h:${appointment.id}`,
-    }),
+    }, db),
     scheduleJob({
       type: "REMINDER_2H",
       scheduledAt: start.minus({ hours: 2 }).toJSDate(),
       appointmentId: appointment.id,
       idempotencyKey: `reminder2h:${appointment.id}`,
-    }),
+    }, db),
   ]);
 }
 
@@ -125,6 +127,9 @@ export interface JobHandlers {
  * como máximo uno de los dos se queda el job.
  */
 export async function processDueJobs(handlers: JobHandlers): Promise<{ processed: number; failed: number }> {
+  // Leases allow recovery after a crash; ownership tokens prevent stale workers overwriting retries.
+  await prisma.scheduledJob.updateMany({ where: { status: "PROCESSING", lastAttemptAt: { lt: new Date(Date.now() - 10 * 60_000) } }, data: { status: "PENDING", claimToken: null } });
+  await prisma.scheduledJob.updateMany({ where: { status: "PENDING", attempts: { gte: MAX_ATTEMPTS } }, data: { status: "FAILED", lastError: "Reintentos agotados tras interrupciones." } });
   const due = await prisma.scheduledJob.findMany({
     where: { status: "PENDING", scheduledAt: { lte: new Date() } },
     orderBy: { scheduledAt: "asc" },
@@ -145,9 +150,10 @@ export async function processDueJobs(handlers: JobHandlers): Promise<{ processed
       continue;
     }
 
+    const claimToken = randomUUID();
     const claimed = await prisma.scheduledJob.updateMany({
       where: { id: job.id, status: "PENDING" },
-      data: { status: "PROCESSING", attempts: { increment: 1 }, lastAttemptAt: new Date() },
+      data: { claimToken, status: "PROCESSING", attempts: { increment: 1 }, lastAttemptAt: new Date() },
     });
     if (claimed.count === 0) continue; // otro proceso se lo llevó
 
@@ -157,17 +163,18 @@ export async function processDueJobs(handlers: JobHandlers): Promise<{ processed
       else if (type === "WAITLIST_OFFER_EXPIRED" && job.waitlistEntryId) await handlers.WAITLIST_OFFER_EXPIRED(job.waitlistEntryId);
       else throw new Error(`Job ${type} sin la referencia esperada (appointmentId/waitlistEntryId).`);
 
-      await prisma.scheduledJob.update({ where: { id: job.id }, data: { status: "COMPLETED", processedAt: new Date() } });
+      await prisma.scheduledJob.updateMany({ where: { id: job.id, status: "PROCESSING", claimToken }, data: { status: "COMPLETED", processedAt: new Date(), claimToken: null } });
       processed += 1;
     } catch (err) {
       const attempts = job.attempts + 1;
       const message = (err as Error)?.message || String(err);
       const exhausted = attempts >= job.maxAttempts;
       logger.error("scheduled_job_failed", { jobId: job.id, type, attempts, exhausted, err });
-      await prisma.scheduledJob.update({
-        where: { id: job.id },
+      await prisma.scheduledJob.updateMany({
+        where: { id: job.id, status: "PROCESSING", claimToken },
         data: {
           status: exhausted ? "FAILED" : "PENDING", // vuelve a PENDING para reintentar en el siguiente tick
+          claimToken: null,
           lastError: message,
         },
       });

@@ -12,6 +12,11 @@ import { logger } from "../lib/logger";
  * médicos.
  */
 export type AuditEventType =
+  | "APPOINTMENT_ARRIVED"
+  | "PAYMENT_RECORDED"
+  | "HUMAN_HANDOFF_CLAIMED"
+  | "HUMAN_HANDOFF_RESOLVED"
+  | "HUMAN_REPLY_SENT"
   | "PATIENT_MESSAGE_RECEIVED"
   | "AI_TOOL_CALLED"
   | "AVAILABILITY_CHECKED"
@@ -82,36 +87,25 @@ export async function listRecentEvents(limit = 25): Promise<AuditEventView[]> {
   }));
 }
 
-const ATTENTION_EVENT_TYPES: AuditEventType[] = [
-  "HUMAN_HANDOFF_REQUESTED",
-  "CALENDAR_SYNC_FAILED",
-  "RESCHEDULE_INCONSISTENT",
-  "SCHEDULED_JOB_FAILED",
-];
 
-/**
- * "Necesita atención" del Overview (ver dashboardPage.ts): cosas que un
- * humano debería mirar — derivaciones a atención humana y fallos de
- * sincronización con Google Calendar de las últimas `hours` horas. No hay
- * un flujo de "resolver" todavía (ver README, riesgos pendientes), así que
- * esto es deliberadamente una ventana de tiempo simple, no una bandeja de
- * tareas completa.
- */
+/** Derivaciones y trabajos fallidos se consultan por su estado actual. */
 export async function listAttentionItems(hours = 24): Promise<AuditEventView[]> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000);
   const rows = await prisma.auditLog.findMany({
-    where: { type: { in: ATTENTION_EVENT_TYPES }, createdAt: { gte: since } },
+    where: { type: { in: ["CALENDAR_SYNC_FAILED", "RESCHEDULE_INCONSISTENT"] }, createdAt: { gte: since } },
     orderBy: { createdAt: "desc" },
     take: 20,
   });
-  return rows.map((r) => ({
+  const patients = await prisma.patient.findMany({ where: { aiPaused: true, clinicId: "default" }, take: 20, orderBy: { handoffRequestedAt: "asc" } });
+  const jobs = await prisma.scheduledJob.findMany({ where: { status: "FAILED" }, take: 20, orderBy: { updatedAt: "desc" } });
+  return [...patients.map(p => ({ id: p.id, type: "HUMAN_HANDOFF_REQUESTED" as AuditEventType, patientId: p.id, appointmentId: null, metadata: { reason: p.handoffReason || "Atención del equipo" }, createdAt: p.handoffRequestedAt || p.createdAt })), ...jobs.map(j => ({ id: j.id, type: "SCHEDULED_JOB_FAILED" as AuditEventType, patientId: null, appointmentId: j.appointmentId, metadata: {}, createdAt: j.updatedAt })), ...rows.map((r) => ({
     id: r.id,
     type: r.type as AuditEventType,
     patientId: r.patientId,
     appointmentId: r.appointmentId,
     metadata: safeParse(r.metadata),
     createdAt: r.createdAt,
-  }));
+  }))];
 }
 
 function safeParse(json: string): Record<string, unknown> {

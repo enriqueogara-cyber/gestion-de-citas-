@@ -36,6 +36,10 @@ model Patient {
   clinicId  String   @default("default")
   phone     String   @unique // formato E.164, ej. 34600111222 (o "demo-<sessionId>" en el simulador)
   name      String?
+  aiPaused Boolean @default(false)
+  handoffReason String?
+  handoffRequestedAt DateTime?
+  handoffClaimedBy String?
   createdAt DateTime @default(now())
 
   appointments Appointment[]
@@ -93,6 +97,9 @@ model Appointment {
   // liberarse un hueco (ver waitlistOrchestrator). Es lo que alimenta el
   // KPI de "huecos recuperados" / "ingresos recuperados".
   recoveredFromWaitlist Boolean @default(false)
+
+  arrivedAt DateTime?
+  paidCents Int @default(0)
 
   googleEventId String? // id del evento en Google Calendar, para poder cancelarlo/moverlo
 
@@ -278,6 +285,7 @@ model ScheduledJob {
   maxAttempts Int      @default(3)
   lastAttemptAt DateTime?
   processedAt   DateTime?
+  claimToken    String?
   lastError     String?
 
   // Evita procesar el mismo recordatorio/caducidad dos veces (reinicio,
@@ -289,4 +297,48 @@ model ScheduledJob {
 
   @@index([status, scheduledAt])
   @@index([clinicId])
+}
+
+model AvailabilityBlock {
+  id String @id @default(cuid())
+  clinicId String @default("default")
+  professionalId String?
+  startsAt DateTime
+  endsAt DateTime
+  reason String
+  createdAt DateTime @default(now())
+  @@index([startsAt, endsAt])
+}
+
+model StaffUser {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String
+  role String @default("RECEPTION")
+  active Boolean @default(true)
+  sessions StaffSession[]
+  createdAt DateTime @default(now())
+}
+
+model StaffSession {
+  tokenHash String @id
+  userId String
+  user StaffUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+}
+
+model InboundMessage {
+  id String @id
+  phone String
+  name String?
+  text String
+  status String @default("PENDING")
+  attempts Int @default(0)
+  claimToken String?
+  lastAttemptAt DateTime?
+  nextAttemptAt DateTime @default(now())
+  reply String?
+  lastError String?
+  createdAt DateTime @default(now())
+  @@index([status, nextAttemptAt])
 }

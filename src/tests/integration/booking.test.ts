@@ -1,4 +1,4 @@
-import test, { before, beforeEach } from "node:test";
+import test, { before, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { DateTime } from "luxon";
 import { prisma } from "../../db/client";
@@ -16,6 +16,7 @@ function nextWeekday(target: number): DateTime {
   return d;
 }
 
+describe("booking.test.ts", () => {
 before(ensureCatalogReady);
 beforeEach(cleanTransactionalData);
 
@@ -96,6 +97,7 @@ test("TEST 3: dos citas a la misma hora con profesionales distintos son ambas v�
 
 // TEST 4 — mañana y tarde abiertas -> availability devuelve ambas (sin límite corto ocultando la tarde, ver bug real de la ronda anterior).
 test("TEST 4: la disponibilidad de un día concreto incluye mañana y tarde", async () => {
+  await makeProfessional("Profesional de prueba");
   const tuesday = nextWeekday(2); // martes: 09:00-14:00, 16:00-20:00
   const slots = await getAvailability("consulta_general", 1, undefined, tuesday);
   assert.ok(slots.some((s) => s.hour < 14), "debe haber huecos de mañana");
@@ -118,4 +120,6 @@ test("TEST 10: un servicio desactivado no admite reservas nuevas", async () => {
   } finally {
     await setServiceActive("revision", true); // no dejamos el catálogo compartido roto para el resto de tests
   }
+});
+
 });

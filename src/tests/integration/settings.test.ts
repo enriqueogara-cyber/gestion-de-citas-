@@ -1,4 +1,4 @@
-import test, { before, beforeEach } from "node:test";
+import test, { before, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { prisma } from "../../db/client";
 import {
@@ -25,6 +25,7 @@ import { ensureCatalogReady, makeProfessional, cleanTransactionalData } from "./
  * — que es justo lo que un refresco de página en el simulador dispara.
  */
 
+describe("settings.test.ts", () => {
 before(ensureCatalogReady);
 beforeEach(cleanTransactionalData);
 
@@ -132,4 +133,6 @@ test("el backend rechaza un tramo con fin <= inicio", async () => {
     () => replaceOpeningHoursForDay(3, [{ start: "10:00", end: "09:00" }]),
     (err: unknown) => err instanceof OpeningHoursValidationError
   );
+});
+
 });

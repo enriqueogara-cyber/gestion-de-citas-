@@ -22,19 +22,12 @@ function initials(name: string): string {
   return (words[0][0] + words[1][0]).toUpperCase();
 }
 
-/**
- * Mismo criterio que `resolveServiceProfessionals` en
- * services/professionals.ts: solo se considera "sin profesionales" un
- * servicio si el centro SÍ tiene profesionales dados de alta pero NINGUNO
- * tiene este servicio marcado. Si el centro no tiene profesionales en
- * absoluto, es el modo MVP deliberado "cualquiera puede" — no es una
- * configuración incompleta, así que no se avisa.
- */
+/** Un servicio requiere al menos un profesional activo con asignación explícita. */
 function hasNoEligibleProfessional(serviceId: string, activeProfessionals: Professional[]): boolean {
-  if (activeProfessionals.length === 0) return false;
+  if (activeProfessionals.length === 0) return true;
   return !activeProfessionals.some((p) => {
     const ids = parseServiceIds(p.serviceIds);
-    return ids.length === 0 || ids.includes(serviceId);
+    return ids.includes(serviceId);
   });
 }
 
@@ -173,7 +166,7 @@ export function renderSettingsPage(
 
       <section class="panel">
         <div class="panel-head"><span class="section-icon-chip">${icon("user", { size: 15 })}</span><h2>Profesionales</h2></div>
-        <p class="panel-desc">Quién atiende, y qué servicios sabe hacer cada uno (vacío = cualquiera). El motor de reservas respeta esto siempre.</p>
+        <p class="panel-desc">Quién atiende, y qué servicios sabe hacer cada uno (sin asignaciones = no recibe citas). El motor de reservas respeta esto siempre.</p>
         <div class="pro-list" id="professionalsBody">${professionalsRows}</div>
         <form id="addProfessionalForm" class="inline-form">
           <input type="text" name="name" placeholder="Nombre del profesional" maxlength="80" required />

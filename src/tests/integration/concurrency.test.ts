@@ -1,4 +1,4 @@
-import test, { before, beforeEach } from "node:test";
+import test, { before, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { DateTime } from "luxon";
 import { clinicConfig } from "../../config";
@@ -13,6 +13,7 @@ function nextWeekday(target: number): DateTime {
   return d;
 }
 
+describe("concurrency.test.ts", () => {
 before(ensureCatalogReady);
 beforeEach(cleanTransactionalData);
 
@@ -56,4 +57,6 @@ test("TEST 9b: cinco reservas concurrentes para el mismo hueco — solo una gana
     )
   );
   assert.equal(results.filter((r) => r === "ok").length, 1);
+});
+
 });
