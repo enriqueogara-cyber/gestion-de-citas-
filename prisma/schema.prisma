@@ -1,0 +1,292 @@
+// Esquema de datos del agente de citas.
+// SQLite por simplicidad para el MVP de un solo centro; migrar a Postgres es
+// cambiar el "provider"/DATABASE_URL cuando se pase a multi-cliente (ver
+// README, sección "SQLite → Postgres"). Los campos `clinicId` ya están
+// presentes en los modelos principales para que ese día no haga falta
+// rediseñar el esquema, aunque hoy solo existe una clínica ("default").
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Fila única hoy (slug "default"): identidad visual y configuración básica
+// del centro, editable desde /simulator/settings sin tocar código ni
+// reiniciar el servidor. src/config.ts sigue teniendo los valores por
+// defecto que se usan para sembrar esta fila la primera vez.
+model Clinic {
+  id         String   @id @default(cuid())
+  slug       String   @unique @default("default")
+  name       String
+  tagline    String
+  brandColor String
+  logoUrl    String   @default("")
+  timezone   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Patient {
+  id        String   @id @default(cuid())
+  clinicId  String   @default("default")
+  phone     String   @unique // formato E.164, ej. 34600111222 (o "demo-<sessionId>" en el simulador)
+  name      String?
+  createdAt DateTime @default(now())
+
+  appointments Appointment[]
+  waitlist     WaitlistEntry[]
+  messages     ConversationMessage[]
+
+  @@index([clinicId])
+}
+
+// Un profesional del centro (dentista, fisio, esteticista, peluquero...).
+// serviceIds es un array JSON de ids de servicio (los servicios siguen
+// definidos en src/config.ts, no en DB, ver sección 23 del README) que ese
+// profesional puede realizar. Sin filas de Professional, el sistema se
+// comporta como "cualquiera puede hacer cualquier servicio" (ver seed).
+model Professional {
+  id         String  @id @default(cuid())
+  clinicId   String  @default("default")
+  name       String
+  active     Boolean @default(true)
+  serviceIds String  @default("[]")
+
+  appointments    Appointment[]
+  waitlistEntries WaitlistEntry[]
+
+  createdAt DateTime @default(now())
+
+  @@index([clinicId, active])
+}
+
+// Estado como String porque SQLite no tiene enums nativos en Prisma; se
+// valida en TypeScript con src/domain/appointmentStateMachine.ts. Valores:
+// PENDING_CONFIRMATION | CONFIRMED | CANCELLED | NO_SHOW | COMPLETED
+model Appointment {
+  id       String @id @default(cuid())
+  clinicId String @default("default")
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id])
+
+  professionalId String?
+  professional   Professional? @relation(fields: [professionalId], references: [id])
+
+  service  String
+  startsAt DateTime
+  endsAt   DateTime
+  status   String   @default("PENDING_CONFIRMATION")
+
+  // Precio del servicio en el momento de la reserva (ver src/config.ts ->
+  // ServiceDef.priceEur). Se guarda una foto aquí para que el reporting
+  // ("ingresos recuperados") no cambie retroactivamente si se ajustan
+  // precios más adelante.
+  priceEurAtBooking Float?
+
+  // true si esta cita nació de aceptar una oferta de lista de espera tras
+  // liberarse un hueco (ver waitlistOrchestrator). Es lo que alimenta el
+  // KPI de "huecos recuperados" / "ingresos recuperados".
+  recoveredFromWaitlist Boolean @default(false)
+
+  googleEventId String? // id del evento en Google Calendar, para poder cancelarlo/moverlo
+
+  reminder24hSentAt DateTime?
+  reminder2hSentAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([startsAt])
+  @@index([status])
+  @@index([professionalId, startsAt])
+  @@index([clinicId])
+}
+
+// Estado como String por la misma razón que en Appointment. Valores:
+// WAITING | OFFERED | ACCEPTING | BOOKED | EXPIRED | CANCELLED
+// "ACCEPTING" es un estado transitorio de muy corta vida (protección
+// compare-and-swap contra doble aceptación, ver waitlistOrchestrator).
+model WaitlistEntry {
+  id       String @id @default(cuid())
+  clinicId String @default("default")
+
+  patientId String
+  patient   Patient @relation(fields: [patientId], references: [id])
+
+  service      String
+  earliestDate DateTime // desde cuándo le vale un hueco
+  latestDate   DateTime // hasta cuándo le vale un hueco
+  status       String   @default("WAITING")
+
+  // Preferencias opcionales para afinar qué huecos son compatibles.
+  professionalId   String? // profesional concreto que pidió, si lo pidió
+  preferredTimeOfDay String? // MORNING | AFTERNOON | null (indiferente)
+
+  offeredSlotStart DateTime?
+  offeredEndAt     DateTime?
+  offerExpiresAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  Professional Professional? @relation(fields: [professionalId], references: [id])
+
+  @@index([status])
+  @@index([clinicId])
+}
+
+// Reserva temporal de un hueco (p.ej. mientras se ofrece a alguien de la
+// lista de espera) para que nadie más pueda reservarlo mientras esa persona
+// decide. Expira sola; el scheduler limpia las caducadas. Ver README
+// "Lista de espera" y src/services/waitlistOrchestrator.ts.
+model SlotHold {
+  id       String  @id @default(cuid())
+  clinicId String  @default("default")
+
+  serviceId      String
+  professionalId String?
+  startsAt       DateTime
+  endsAt         DateTime
+
+  // Para quién es válido este hold: solo ese paciente puede "atravesarlo"
+  // al reservar; para cualquier otro cuenta como ocupado.
+  patientId String
+  reason    String // p.ej. "WAITLIST_OFFER"
+
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([startsAt, endsAt])
+  @@index([expiresAt])
+}
+
+model ConversationMessage {
+  id        String   @id @default(cuid())
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id])
+
+  role    String // "user" | "assistant"
+  content String
+
+  createdAt DateTime @default(now())
+
+  @@index([patientId, createdAt])
+}
+
+// Rastro de auditoría de lo importante que pasa en el sistema: alimenta el
+// "event feed" del dashboard y sirve para depurar/demostrar el flujo sin
+// tener que leer logs de servidor. metadata es JSON libre y pequeño; nunca
+// debe contener datos clínicos ni el contenido íntegro de conversaciones.
+model AuditLog {
+  id       String @id @default(cuid())
+  clinicId String @default("default")
+
+  type      String // ver src/services/auditLog.ts -> AuditEventType
+  patientId String?
+  appointmentId String?
+  metadata  String @default("{}") // JSON
+
+  createdAt DateTime @default(now())
+
+  @@index([clinicId, createdAt])
+  @@index([type])
+}
+
+// Instrumentación de coste/latencia del LLM (ver README, "Rendimiento y
+// coste LLM"). Una fila por cada llamada a OpenRouter, tokens incluidos si
+// el proveedor los devuelve. Nunca guarda el contenido de la conversación,
+// solo métricas — esto no es un log de mensajes.
+model LlmCallLog {
+  id       String @id @default(cuid())
+  clinicId String @default("default")
+
+  model           String
+  latencyMs       Int
+  promptTokens    Int?
+  completionTokens Int?
+  toolCallCount   Int      @default(0)
+  success         Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([clinicId, createdAt])
+}
+
+// Catálogo de servicios editable desde /simulator/settings (ver
+// src/services/serviceCatalog.ts). `slug` es el id técnico estable usado
+// internamente (Appointment.service, WaitlistEntry.service,
+// Professional.serviceIds) — nunca se muestra al paciente, siempre se
+// traduce a `name`. Desactivar un servicio (active=false) no borra citas
+// históricas: siguen guardando el slug y se les sigue pudiendo poner
+// nombre/precio buscando aquí, solo deja de poder reservarse uno nuevo.
+model Service {
+  id       String @id @default(cuid())
+  clinicId String @default("default")
+
+  slug            String  @unique
+  name            String
+  durationMinutes Int
+  priceEur        Float?
+  active          Boolean @default(true)
+  bufferBeforeMinutes Int @default(0)
+  bufferAfterMinutes  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clinicId, active])
+}
+
+// Horario semanal editable desde Settings (ver src/services/serviceCatalog.ts).
+// Varias filas por día = horario partido (mañana/tarde); ningún día = cerrado
+// ese día. weekday: 0=domingo .. 6=sábado (igual que src/config.ts antes).
+model OpeningHoursRule {
+  id       String @id @default(cuid())
+  clinicId String @default("default")
+
+  weekday   Int
+  startTime String // "HH:mm"
+  endTime   String // "HH:mm"
+
+  createdAt DateTime @default(now())
+
+  @@index([clinicId, weekday])
+}
+
+// Trabajos programados persistentes (recordatorios, caducidad de ofertas de
+// waitlist) — ver README "Scheduler persistente". Sustituye la dependencia
+// exclusiva de node-cron + memoria: si el proceso se reinicia, los jobs
+// pendientes siguen aquí y se retoman (dentro de una ventana razonable, ver
+// scheduler/persistentJobs.ts) en vez de perderse silenciosamente.
+model ScheduledJob {
+  id       String @id @default(cuid())
+  clinicId String @default("default")
+
+  type            String // REMINDER_24H | REMINDER_2H | WAITLIST_OFFER_EXPIRED
+  appointmentId   String?
+  waitlistEntryId String?
+
+  scheduledAt DateTime
+  status      String   @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED | CANCELLED
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(3)
+  lastAttemptAt DateTime?
+  processedAt   DateTime?
+  lastError     String?
+
+  // Evita procesar el mismo recordatorio/caducidad dos veces (reinicio,
+  // dos schedulers, retry) — combinación estable de tipo + entidad.
+  idempotencyKey String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, scheduledAt])
+  @@index([clinicId])
+}

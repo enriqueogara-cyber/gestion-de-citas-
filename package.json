@@ -1,0 +1,40 @@
+{
+  "name": "clinic-whatsapp-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agente de citas por WhatsApp con IA para clinicas, fisio, estetica y peluquerias. Reduce no-shows y rellena huecos desde lista de espera.",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --require ts-node/register/transpile-only --test src/tests/index.test.ts",
+    "test:integration": "node scripts/runIntegrationTests.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev --name init",
+    "prisma:studio": "prisma studio",
+    "prisma:seed": "ts-node prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "googleapis": "^144.0.0",
+    "luxon": "^3.5.0",
+    "node-cron": "^3.0.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/luxon": "^3.4.2",
+    "@types/node": "^22.7.4",
+    "@types/node-cron": "^3.0.11",
+    "prisma": "^5.20.0",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.2"
+  }
+}
