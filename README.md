@@ -72,3 +72,7 @@ Un único centro, SQLite y un único proceso de servidor. Antes de usar paciente
 La persistencia evita procesar dos veces un webhook recibido; no garantiza exactamente una entrega externa si el servidor cae entre el envío y su confirmación en base de datos.
 
 Consulta [Preparación del piloto](docs/PILOTO.md) para actualizar sin perder datos, definir permisos, restaurar copias y comprobar los flujos.
+
+## Vista del paciente
+
+La ruta `/reservar` muestra una demostración pública de reserva en cuatro pasos: servicio, profesional, horario y datos de ejemplo. Usa el catálogo y los profesionales activos del centro. Los horarios son ficticios y se indican como tales; la confirmación es simulada. Los datos del formulario no se transmiten ni se guardan y no se crean citas ni se envían mensajes. Esta vista permite revisar la experiencia antes de conectar disponibilidad real, verificación de teléfono y gestión segura de reservas.
