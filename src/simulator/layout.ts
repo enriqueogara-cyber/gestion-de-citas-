@@ -167,9 +167,9 @@ export function icon(name: keyof typeof ICON_PATHS, opts: { size?: number; class
 export type NavKey = "chat" | "dashboard" | "waitlist" | "settings" | "operations";
 
 const NAV_ITEMS: { key: NavKey; href: string; label: string; icon: keyof typeof ICON_PATHS }[] = [
-  { key: "operations", href: "/simulator/operations", label: "Recepción", icon: "calendar" },
-  { key: "chat", href: "/simulator/", label: "Chat", icon: "chat" },
   { key: "dashboard", href: "/simulator/dashboard", label: "Overview", icon: "overview" },
+  { key: "operations", href: "/simulator/operations", label: "Recepción", icon: "calendar" },
+  { key: "chat", href: "/simulator/chat", label: "Chat", icon: "chat" },
   { key: "waitlist", href: "/simulator/waitlist", label: "Lista de espera", icon: "waitlist" },
   { key: "settings", href: "/simulator/settings", label: "Ajustes", icon: "settings" },
 ];

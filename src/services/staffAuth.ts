@@ -35,7 +35,7 @@ authRouter.post("/login", rateLimit({ windowMs: 15 * 60_000, max: 10 }), async (
     const token = randomBytes(32).toString("hex");
     await prisma.staffSession.create({ data: { tokenHash: digest(token), userId: user.id, expiresAt: new Date(Date.now() + 8 * 3600_000) } });
     res.cookie("clinic_session", token, { httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", maxAge: 8 * 3600_000, path: "/" });
-    res.redirect("/simulator/operations");
+    res.redirect("/simulator/dashboard");
   } catch (err) { next(err); }
 });
 export async function staffAccess(req: Request, res: Response, next: NextFunction) {

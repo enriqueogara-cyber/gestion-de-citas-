@@ -56,6 +56,10 @@ function demoPhone(sessionId: string): string {
 // --- Páginas ---
 
 simulatorRouter.get("/", async (_req: Request, res: Response) => {
+  res.redirect("/simulator/dashboard");
+});
+
+simulatorRouter.get("/chat", async (_req: Request, res: Response) => {
   const settings = await getClinicSettings();
   res.type("html").send(renderChatPage(settings));
 });

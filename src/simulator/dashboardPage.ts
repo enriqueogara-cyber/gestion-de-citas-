@@ -205,10 +205,11 @@ export function renderDashboardPage(
     : "";
 
   const body = `
+  <section class="panel"><h1>Overview</h1><p>Resumen de la clínica · Este mes</p></section>
   <section class="hero-kpi">
-    <div class="hero-kpi-label">${icon("calendar", { size: 12 })} Valor de reservas recuperadas</div>
-    <div class="hero-kpi-value">${stats.recoveredRevenueEur.toLocaleString("es-ES", { minimumFractionDigits: 0 })} €</div>
-    <p class="hero-kpi-sub">Este mes · Reservas recuperadas que siguen activas o se han atendido. No equivale a cobros.</p>
+    <div class="hero-kpi-label">${icon("calendar", { size: 12 })} Citas gestionadas</div>
+    <div class="hero-kpi-value">${stats.totalAppointments}</div>
+    <p class="hero-kpi-sub">Este mes · Consulta el estado de las citas, la próxima agenda y los asuntos pendientes.</p>
   </section>
 
   <section class="panel"><p>${stats.pendingAttendance} citas pendientes de registrar asistencia.</p><p>Citas recuperadas atendidas: <strong>${stats.recoveredAttended}</strong> · Valor atendido: <strong>${stats.recoveredAttendedValueEur.toLocaleString("es-ES")} €</strong> · Cobros registrados: <strong>${stats.recoveredPaidEur.toLocaleString("es-ES")} €</strong></p><a class="btn btn-primary" href="/simulator/operations">Abrir recepción y elegir periodo</a></section>
@@ -404,7 +405,7 @@ export function renderDashboardPage(
     try {
       const res = await fetch("/simulator/api/dashboard");
       const data = await res.json();
-      document.querySelector(".hero-kpi-value").textContent = data.stats.recoveredRevenueEur.toLocaleString("es-ES") + " €";
+      document.querySelector(".hero-kpi-value").textContent = data.stats.totalAppointments;
       const statVals = document.querySelectorAll(".stat-value");
       statVals[0].textContent = data.stats.recoveredSlots;
       statVals[1].textContent = Math.round(data.stats.confirmationRate * 100) + "%";
