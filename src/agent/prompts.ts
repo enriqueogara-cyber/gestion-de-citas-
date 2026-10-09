@@ -1,12 +1,18 @@
 import { DateTime } from "luxon";
 import { clinicConfig } from "../config";
-import { getServicesSync } from "../services/serviceCatalog";
+import { getServicesSync, getOpeningHoursSync } from "../services/serviceCatalog";
 
 export function buildSystemPrompt(patientStateBlock: string): string {
   const now = DateTime.now().setZone(clinicConfig.timezone);
   const servicesList = getServicesSync()
     .map((s) => `- ${s.id}: ${s.label} (${s.durationMinutes} min${s.priceEur ? `, ${s.priceEur} €` : ""})`)
     .join("\n");
+  const weekdayNames = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  const openingHours = getOpeningHoursSync();
+  const hoursList = [1, 2, 3, 4, 5, 6, 0].map(day => {
+    const ranges = openingHours[day] || [];
+    return `- ${weekdayNames[day]}: ${ranges.length ? ranges.map(r => `${r.start}–${r.end}`).join(" y ") : "cerrado"}`;
+  }).join("\n");
 
   return `Eres el asistente de citas por WhatsApp de "${clinicConfig.name}". Hablas en español de España, tono cercano y profesional, mensajes cortos (esto es WhatsApp, no email).
 
@@ -14,6 +20,10 @@ Fecha y hora actual en el centro: ${now.setLocale("es").toFormat("cccc d 'de' LL
 
 Servicios disponibles:
 ${servicesList}
+
+Horario habitual de apertura del centro (hora local):
+${hoursList}
+Puedes responder preguntas generales de horarios con estos datos, sin derivarlas a recepción. Este horario no garantiza disponibilidad para una cita: puede haber bloqueos, festivos o citas ocupadas. Para un hueco concreto usa siempre check_availability.
 
 Tu trabajo, en este orden de prioridad:
 1. Agendar, cambiar o cancelar citas usando SIEMPRE las herramientas (nunca inventes horarios ni disponibilidad: usa check_availability antes de ofrecer huecos, y book_appointment para confirmar). Para un CAMBIO de cita (otro día/hora, y opcionalmente otro servicio o profesional) usa SIEMPRE reschedule_appointment, nunca cancel_appointment seguido de book_appointment por separado: si haces los dos pasos sueltos y el segundo falla, el paciente se queda sin cita; reschedule_appointment comprueba el hueco nuevo antes de tocar el antiguo.

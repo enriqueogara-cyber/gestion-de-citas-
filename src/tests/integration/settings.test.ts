@@ -13,6 +13,7 @@ import {
 } from "../../services/serviceCatalog";
 import { setProfessionalServices, parseServiceIds } from "../../services/professionals";
 import { ensureCatalogReady, makeProfessional, cleanTransactionalData } from "./setup";
+import { buildSystemPrompt } from "../../agent/prompts";
 
 /**
  * TEST 5E — regresión de Settings (servicios, asignaciones
@@ -28,6 +29,22 @@ import { ensureCatalogReady, makeProfessional, cleanTransactionalData } from "./
 describe("settings.test.ts", () => {
 before(ensureCatalogReady);
 beforeEach(cleanTransactionalData);
+
+test("el asistente recibe el horario editado y los días cerrados del catálogo", async () => {
+  const originalMonday = [...(getOpeningHoursSync()[1] || [])];
+  const originalSunday = [...(getOpeningHoursSync()[0] || [])];
+  try {
+    await replaceOpeningHoursForDay(1, [{ start: "10:15", end: "13:45" }]);
+    await replaceOpeningHoursForDay(0, []);
+    const prompt = buildSystemPrompt("Paciente de prueba");
+    assert.ok(prompt.includes("lunes: 10:15–13:45"));
+    assert.ok(prompt.includes("domingo: cerrado"));
+    assert.ok(!prompt.includes("lunes: 09:00"));
+  } finally {
+    await replaceOpeningHoursForDay(1, originalMonday);
+    await replaceOpeningHoursForDay(0, originalSunday);
+  }
+});
 
 test("crear un servicio lo persiste y aparece en el catálogo en memoria tras recargar", async () => {
   const countBefore = getServicesSync().length;

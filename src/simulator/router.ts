@@ -248,7 +248,7 @@ simulatorRouter.get("/api/history", async (req: Request, res: Response) => {
     where: { patientId: patient.id },
     orderBy: { createdAt: "asc" },
   });
-  res.json({ messages: messages.map((m) => ({ role: m.role, content: m.content })) });
+  res.json({ messages: messages.map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt })) });
 });
 
 // Estado real (nunca inventado) de la conversación actual, para el panel

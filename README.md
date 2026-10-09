@@ -21,15 +21,15 @@ npm run prisma:seed
 npm run dev
 ```
 
-Abre http://localhost:3000/simulator/operations. Con `OPENROUTER_API_KEY` configurada, el chat usa el modelo real. Sin credenciales de Google, la disponibilidad se calcula con los datos locales. WhatsApp requiere configuración de Meta.
+Abre http://localhost:3000/simulator/ para entrar en Overview. Con `OPENROUTER_API_KEY` configurada, el chat usa el modelo real. Sin credenciales de Google, la disponibilidad se calcula con los datos locales. WhatsApp requiere configuración de Meta.
 
 En Windows, si una instalación nueva de Prisma no crea el fichero SQLite, crea primero un archivo vacío en la ruta de DATABASE_URL, por ejemplo `New-Item -ItemType File prisma/dev.db`, y repite `prisma migrate deploy`. No sobrescribas una base existente.
 
 ## Pantallas
 
 - **Recepción**: agenda diaria por profesional; crear, cambiar o cancelar citas; registrar llegada, completado y ausencia; registrar cobros; bloquear vacaciones y descansos; atender conversaciones derivadas; ver mensajes fallidos. Los administradores también gestionan usuarios y copias.
-- **Overview**: valor de reservas recuperadas este mes, citas atendidas, cobros registrados, actividad e incidencias. La demo reproduce una cancelación y una recuperación de hueco.
-- **Chat**: simulador del canal de pacientes. El reinicio de conversación limpia mensajes, conservando sus reservas y trabajos.
+- **Overview**: entrada principal con citas del mes, resultados de recuperación, actividad e incidencias. La demo reproduce una cancelación y una recuperación de hueco.
+- **Chat** (`/simulator/chat`): simulador del canal de pacientes. Cabecera, bienvenida, accesos e historial se desplazan juntos, con escritura fija y botón para volver al final. El reinicio de conversación limpia mensajes, conservando sus reservas y trabajos.
 - **Lista de espera**: entradas y ofertas activas.
 - **Ajustes**: identidad del centro, catálogo, profesionales y horario semanal.
 
@@ -72,6 +72,8 @@ Un único centro, SQLite y un único proceso de servidor. Antes de usar paciente
 La persistencia evita procesar dos veces un webhook recibido; no garantiza exactamente una entrega externa si el servidor cae entre el envío y su confirmación en base de datos.
 
 Consulta [Preparación del piloto](docs/PILOTO.md) para actualizar sin perder datos, definir permisos, restaurar copias y comprobar los flujos.
+
+Consulta la [revisión del producto y competidores](docs/REVISION_PRODUCTO_2026-10-09.md) para conocer el alcance comprobado, las diferencias respecto a alternativas y el orden recomendado de mejoras.
 
 ## Vista del paciente
 

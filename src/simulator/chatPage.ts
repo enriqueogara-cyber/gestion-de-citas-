@@ -40,41 +40,43 @@ ${GOOGLE_FONT_LINK}
 <style>
 ${sharedTokensCss(brand)}
   body {
-    display: flex; flex-direction: column;
+    display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
   }
+  [hidden] { display: none !important; }
+  .topnav { flex-shrink: 0; }
   .stage-wrap {
-    flex: 1; display: flex; align-items: center; justify-content: center;
-    padding: 32px 16px; overflow-x: hidden; overflow-y: auto; min-height: 0;
-  }
-  @media (max-width: 480px) {
-    .stage-wrap { padding: 14px 10px; }
-    .shell { height: min(680px, 78vh); }
+    flex: 1; display: flex; justify-content: center;
+    padding: 18px 16px 10px; overflow: hidden; min-height: 0;
   }
 
-  .stage { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; }
-  .eyebrow { text-align: center; color: var(--text-secondary); font-size: 13px; max-width: 420px; line-height: 1.55; }
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; min-height: 0; }
+  .eyebrow { margin: 0; flex-shrink: 0; text-align: center; color: var(--text-secondary); font-size: 12px; max-width: 680px; line-height: 1.55; }
   .eyebrow strong { color: var(--text-primary); font-weight: 650; }
 
-  .layout-row { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; }
+  .layout-row { display: flex; flex: 1; min-height: 0; flex-direction: column; align-items: center; gap: 18px; width: 100%; }
   @media (min-width: 880px) {
-    .layout-row { flex-direction: row; align-items: flex-start; justify-content: center; }
+    .layout-row { flex-direction: row; align-items: stretch; justify-content: center; }
   }
 
   /* Los chats admiten su propia escala de radius, algo más redondeada que
      el resto del producto (ver "border radius" de la auditoría visual). */
   .shell {
     --radius-chat: 22px;
-    width: 100%; max-width: 440px; height: min(720px, 82vh);
+    width: 100%; max-width: 600px; height: 100%; min-height: 0;
     background: var(--surface); border-radius: var(--radius-chat); box-shadow: var(--shadow-lg);
     display: flex; flex-direction: column; overflow: hidden;
     border: 1px solid var(--border); flex-shrink: 0;
   }
+  .conversation-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
+  .conversation-scroll { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--brand-tint); scrollbar-gutter: stable; }
+  .latest-btn { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 10; border: 1px solid var(--border-strong); border-radius: 999px; padding: 10px 16px; background: var(--surface); color: var(--brand-dark); font-family: inherit; font-size: 12px; font-weight: 600; box-shadow: var(--shadow-md); cursor: pointer; white-space: nowrap; }
+  .latest-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
   /* --- Panel "Estado de conversación" (solo desktop) --- */
   .state-panel { display: none; }
   @media (min-width: 880px) {
     .state-panel {
-      display: flex; flex-direction: column; width: 272px; height: min(720px, 82vh);
+      display: flex; flex-direction: column; width: 272px; height: 100%; min-height: 0;
       background: linear-gradient(165deg, var(--brand-tint), var(--surface) 45%);
       border: 1px solid var(--border); border-radius: var(--radius-lg);
       box-shadow: var(--shadow-md); padding: 20px; flex-shrink: 0;
@@ -167,16 +169,17 @@ ${sharedTokensCss(brand)}
   .chip-menu-item:hover:not(:disabled) { background: var(--surface-subtle); }
   .chip-menu-item:disabled { opacity: 0.5; cursor: default; }
 
-  .chat-body { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--brand-tint); }
+  .chat-body { background: var(--brand-tint); }
   #messages {
-    flex: 1; overflow-y: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 12px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 16px;
   }
+  #messages:empty { display: none; }
 
   /* --- Estado de bienvenida: lo primero que ve el paciente, antes de
      escribir nada — nada de caja vacía esperando (ver punto 11). --- */
   .welcome-state {
-    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: 30px 26px; text-align: center; overflow-y: auto;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 28px 22px 20px; text-align: center;
   }
   .welcome-avatar {
     width: 56px; height: 56px; border-radius: 50%; margin-bottom: 16px; flex-shrink: 0;
@@ -187,7 +190,7 @@ ${sharedTokensCss(brand)}
   .welcome-avatar img { width: 100%; height: 100%; object-fit: cover; }
   .welcome-title { font-size: 17px; font-weight: 700; color: var(--text-primary); margin: 0 0 6px; letter-spacing: -0.01em; }
   .welcome-sub { font-size: 13px; color: var(--text-secondary); margin: 0 0 22px; max-width: 280px; line-height: 1.5; }
-  .welcome-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 280px; }
+  .welcome-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 440px; }
   .welcome-btn {
     display: flex; align-items: center; gap: 11px; width: 100%; padding: 12px 15px; border-radius: var(--radius-md);
     border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font-size: 13.5px; font-weight: 600;
@@ -248,11 +251,11 @@ ${sharedTokensCss(brand)}
   @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.45; } 30% { transform: translateY(-3px); opacity: 1; } }
 
   form {
-    display: flex; gap: 8px; padding: 12px 14px; background: var(--surface);
+    display: flex; flex-shrink: 0; gap: 8px; padding: 12px 14px; padding-bottom: max(12px, env(safe-area-inset-bottom)); background: var(--surface);
     border-top: 1px solid var(--border); align-items: flex-end;
   }
   textarea {
-    flex: 1; padding: 10px 15px; border-radius: 19px; border: 1px solid var(--border-strong);
+    flex: 1; min-width: 0; padding: 10px 15px; border-radius: 19px; border: 1px solid var(--border-strong);
     background: var(--surface-subtle); color: var(--text-primary); font-size: 14px; font-family: inherit;
     outline: none; transition: border-color 0.15s, box-shadow 0.15s; resize: none;
     max-height: 110px; line-height: 1.4;
@@ -279,7 +282,7 @@ ${sharedTokensCss(brand)}
   button[type=submit]:disabled { opacity: 0.4; cursor: default; }
   button[type=submit] svg { width: 17px; height: 17px; }
 
-  .powered { text-align: center; font-size: 11.5px; color: var(--text-tertiary); }
+  .powered { margin: 0; flex-shrink: 0; text-align: center; font-size: 11.5px; color: var(--text-tertiary); }
   .powered b { color: var(--text-secondary); font-weight: 650; }
 
   .overlay {
@@ -309,6 +312,16 @@ ${sharedTokensCss(brand)}
   @media (prefers-reduced-motion: reduce) {
     .row, .demo-popover.show, .overlay, .confirm-card { animation: none; }
   }
+  @media (max-width: 480px) {
+    .stage-wrap { padding: 8px 6px; }
+    .stage { gap: 6px; }
+    .eyebrow, .powered { display: none; }
+    .shell { border-radius: 16px; }
+    .welcome-state { padding: 22px 14px 16px; }
+    .welcome-btn { padding: 12px 10px; font-size: 12px; gap: 7px; }
+    #messages { padding: 14px 12px; }
+    textarea { font-size: 16px; }
+  }
 </style>
 </head>
 <body>
@@ -318,6 +331,8 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
     <p class="eyebrow">Simulador de conversación — así habla un paciente con <strong>${name}</strong> por WhatsApp.</p>
     <div class="layout-row">
       <div class="shell">
+        <div class="conversation-wrap">
+        <div class="conversation-scroll" id="conversationScroll" tabindex="0" role="region" aria-label="Conversación con la clínica">
         <header>
           <div class="avatar">${logoMarkup}</div>
           <div class="head-info">
@@ -359,11 +374,14 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
             </div>
             <p class="welcome-note">Disponible 24/7 para gestión de citas</p>
           </div>
-          <div id="messages" hidden></div>
+          <div id="messages" role="log" aria-label="Mensajes" aria-live="polite" aria-relevant="additions text"></div>
+        </div>
+        </div>
+        <button id="latestBtn" class="latest-btn" type="button" hidden>↓ Últimos mensajes</button>
         </div>
 
         <form id="chatForm">
-          <textarea id="textInput" rows="1" placeholder="Escribe un mensaje…" autocomplete="off"></textarea>
+          <textarea id="textInput" rows="1" placeholder="Escribe un mensaje…" aria-label="Escribe un mensaje" autocomplete="off"></textarea>
           <button type="submit" aria-label="Enviar">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.4 20.6 21 12 3.4 3.4 3 10l13 2-13 2z"/></svg>
           </button>
@@ -397,7 +415,11 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
   };
 
   const messagesEl = document.getElementById("messages");
-  const welcomeEl = document.getElementById("welcomeState");
+  const scrollEl = document.getElementById("conversationScroll");
+  const latestBtn = document.getElementById("latestBtn");
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let followLatest = true;
+  let busy = false;
   const form = document.getElementById("chatForm");
   const input = document.getElementById("textInput");
   const resetBtn = document.getElementById("resetBtn");
@@ -414,38 +436,51 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
   const sendBtn = form.querySelector("button[type=submit]");
   const stateBody = document.getElementById("stateBody");
 
-  function showWelcome(show) {
-    welcomeEl.hidden = !show;
-    messagesEl.hidden = show;
+  function atBottom() {
+    return scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 64;
   }
+  function scrollToLatest(smooth) {
+    scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: smooth && !reducedMotion.matches ? "smooth" : "instant" });
+    latestBtn.hidden = true;
+  }
+  scrollEl.addEventListener("scroll", () => {
+    followLatest = atBottom();
+    latestBtn.hidden = followLatest || !messagesEl.children.length;
+  }, { passive: true });
+  latestBtn.addEventListener("click", () => { followLatest = true; scrollToLatest(true); });
+  new ResizeObserver(() => { if (followLatest && messagesEl.children.length) scrollToLatest(false); }).observe(scrollEl);
 
   function closeMoreMenu() {
     moreChipMenu.classList.remove("show");
     moreChipBtn.setAttribute("aria-expanded", "false");
   }
 
-  function setBusy(busy) {
-    input.disabled = busy;
-    sendBtn.disabled = busy;
-    disableableChips.forEach((c) => (c.disabled = busy));
-    if (busy) closeMoreMenu();
+  function setBusy(value) {
+    busy = value;
+    input.disabled = value;
+    sendBtn.disabled = value;
+    resetBtn.disabled = value;
+    disableableChips.forEach((c) => (c.disabled = value));
+    if (value) closeMoreMenu();
   }
 
   function autoGrow() {
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 110) + "px";
+    if (followLatest && messagesEl.children.length) scrollToLatest(false);
   }
   input.addEventListener("input", autoGrow);
 
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       form.requestSubmit();
     }
   });
 
-  function timeNow() {
-    return new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+  function messageTime(createdAt) {
+    const date = createdAt ? new Date(createdAt) : new Date();
+    return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
   }
 
   // Red de seguridad, no la vía principal: el prompt ya le pide al modelo
@@ -478,6 +513,7 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     if (opts.pending) {
+      bubble.setAttribute("aria-label", "El asistente está escribiendo");
       bubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
     } else {
       bubble.textContent = role === "assistant" ? stripLightMarkdown(text) : text;
@@ -487,13 +523,14 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
     if (!opts.pending && role !== "system" && role !== "handoff") {
       const ts = document.createElement("div");
       ts.className = "timestamp";
-      ts.textContent = timeNow();
+      ts.textContent = messageTime(opts.createdAt);
       col.appendChild(ts);
     }
 
     row.appendChild(col);
     messagesEl.appendChild(row);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (followLatest) scrollToLatest(false);
+    else latestBtn.hidden = false;
     return row;
   }
 
@@ -610,18 +647,17 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
 
   async function loadHistory() {
     const res = await fetch("/simulator/api/history?sessionId=" + encodeURIComponent(sessionId));
+    if (!res.ok) throw new Error("No se pudo cargar la conversación.");
     const data = await res.json();
     messagesEl.innerHTML = "";
-    if (!data.messages || data.messages.length === 0) {
-      showWelcome(true);
-    } else {
-      showWelcome(false);
-      data.messages.forEach((m) => addRow(m.role === "user" ? "user" : "assistant", m.content));
-    }
+    followLatest = true;
+    (data.messages || []).forEach((m) => addRow(m.role === "user" ? "user" : "assistant", m.content, { createdAt: m.createdAt }));
+    if (!messagesEl.children.length) { scrollEl.scrollTop = 0; latestBtn.hidden = true; }
   }
 
   async function sendMessage(text) {
-    showWelcome(false);
+    if (busy) return;
+    followLatest = true;
     addRow("user", text);
     const pendingRow = addRow("assistant", "", { pending: true });
     setBusy(true);
@@ -649,7 +685,7 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
       addRow("system", "Error de red hablando con el agente.");
     } finally {
       setBusy(false);
-      input.focus();
+      if (followLatest) input.focus({ preventScroll: true });
       refreshState();
     }
   }
@@ -692,9 +728,9 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
       demoPopover.textContent = "Modo demo: simulador local del agente.";
     });
 
-  loadHistory();
+  setBusy(true);
+  loadHistory().catch(() => addRow("system", "No se pudo cargar el historial. Recarga la página para volver a intentarlo.")).finally(() => setBusy(false));
   refreshState();
-  input.focus();
 })();
 </script>
 </body>
