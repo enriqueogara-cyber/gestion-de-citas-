@@ -57,6 +57,7 @@ export async function staffAccess(req: Request, res: Response, next: NextFunctio
     if (res.locals.staff.role !== "ADMIN" && (req.path === "/settings" || /^\/api\/(settings|services|professionals|opening-hours|demo|staff|backup)/.test(req.path))) { res.status(403).send("Esta acción requiere un administrador."); return; }
     const original = res.send.bind(res);
     res.send = ((body: unknown) => {
+      if (typeof body === "string" && res.locals.staff.role !== "ADMIN") body = body.replace(/<a\b[^>]*href="\/simulator\/settings"[^>]*>[\s\S]*?<\/a>/g, "");
       if (typeof body === "string" && body.includes("</head>")) body = body.replace("</head>", `<script>const clinicCsrf=${JSON.stringify(res.locals.csrf)};const originalFetch=window.fetch.bind(window);window.fetch=(input,options={})=>{const url=new URL(typeof input==='string'?input:input.url,location.href);if(url.origin===location.origin){const headers=new Headers(options.headers||(input instanceof Request?input.headers:undefined));headers.set('X-Clinic-CSRF',clinicCsrf);options={...options,headers};}return originalFetch(input,options);};</script></head>`);
       return original(body);
     }) as Response["send"];

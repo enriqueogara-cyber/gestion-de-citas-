@@ -83,3 +83,14 @@ test("rateLimit: con RATE_LIMIT_DISABLED=1, nunca bloquea", () => {
     else process.env.RATE_LIMIT_DISABLED = prev;
   }
 });
+
+test("rateLimit: los límites anidados no consumen el cupo del otro", () => {
+  const general = rateLimit({ windowMs: 60_000, max: 60 });
+  const specific = rateLimit({ windowMs: 60_000, max: 3 });
+  const { req, res, getStatus } = fakeReqRes("10.20.30.40", "/nested");
+  let passed = 0;
+  for (let i = 0; i < 3; i++) general(req, res, () => specific(req, res, () => { passed++; }));
+  assert.equal(passed, 3); assert.equal(getStatus(), 200);
+  general(req, res, () => specific(req, res, () => { passed++; }));
+  assert.equal(passed, 3); assert.equal(getStatus(), 429);
+});

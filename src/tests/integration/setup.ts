@@ -34,6 +34,8 @@ export async function makePatient(phoneSuffix: string, name = "Test") {
 
 /** Borra todo lo transaccional (no toca Service/OpeningHoursRule/Clinic, que son el catálogo compartido entre tests). */
 export async function cleanTransactionalData(): Promise<void> {
+  await prisma.portalAccess.deleteMany({});
+  await prisma.contactRequest.deleteMany({});
   await prisma.staffSession.deleteMany({});
   await prisma.staffUser.deleteMany({});
   await prisma.inboundMessage.deleteMany({});

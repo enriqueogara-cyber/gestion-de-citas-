@@ -371,6 +371,7 @@ ${navBar("chat", { name: settings.name, brandColor: settings.brandColor })}
               <button class="welcome-btn" type="button" data-msg="¿Qué citas tengo?">${icon("list", { size: 15 })}Ver mis citas</button>
               <button class="welcome-btn" type="button" data-msg="Quiero cambiar mi cita">${icon("refresh", { size: 15 })}Cambiar cita</button>
               <button class="welcome-btn" type="button" data-msg="Quiero cancelar mi cita">${icon("x", { size: 15 })}Cancelar cita</button>
+              <button class="welcome-btn" type="button" data-msg="Quiero hablar con una persona de recepción">${icon("user", { size: 15 })}Hablar con recepción</button>
             </div>
             <p class="welcome-note">Disponible 24/7 para gestión de citas</p>
           </div>

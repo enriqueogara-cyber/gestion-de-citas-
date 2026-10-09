@@ -18,6 +18,7 @@ interface Bucket {
 }
 
 const buckets = new Map<string, Bucket>();
+let limiterId = 0;
 
 function clientKey(req: Request): string {
   // Suficiente para el simulador local: no hay proxy/usuarios reales
@@ -26,11 +27,12 @@ function clientKey(req: Request): string {
 }
 
 export function rateLimit(opts: { windowMs: number; max: number }) {
+  const id = ++limiterId;
   const disabled = process.env.RATE_LIMIT_DISABLED === "1";
   return (req: Request, res: Response, next: NextFunction) => {
     if (disabled) return next();
 
-    const key = `${req.baseUrl}${req.path}:${clientKey(req)}`;
+    const key = `${id}:${req.baseUrl}${req.path}:${clientKey(req)}`;
     const now = Date.now();
     const bucket = buckets.get(key);
 

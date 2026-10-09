@@ -77,4 +77,12 @@ Consulta la [revisión del producto y competidores](docs/REVISION_PRODUCTO_2026-
 
 ## Vista del paciente
 
-La ruta `/reservar` muestra una demostración pública de reserva en cuatro pasos: servicio, profesional, horario y datos de ejemplo. Usa el catálogo y los profesionales activos del centro. Los horarios son ficticios y se indican como tales; la confirmación es simulada. Los datos del formulario no se transmiten ni se guardan y no se crean citas ni se envían mensajes. Esta vista permite revisar la experiencia antes de conectar disponibilidad real, verificación de teléfono y gestión segura de reservas.
+La ruta `/reservar` permite reservar en cuatro pasos con disponibilidad real de la agenda: servicio, profesional, horario y datos de contacto. Guarda la cita y sus recordatorios. Las solicitudes repetidas con la misma clave no vuelven a reservar; las interrupciones ambiguas quedan para revisión en recepción.
+
+Tras reservar, el paciente puede guardar un enlace privado para confirmar, cambiar o cancelar esa cita, sin crear una cuenta. El token aleatorio se guarda como hash en la base y viaja en la cabecera de autorización; el enlace usa un fragmento que no se envía en la URL al servidor. Caduca a los 90 días. Recepción puede generar otro enlace (revocando los anteriores) desde la búsqueda de pacientes. Un cambio de cita desde recepción conserva el enlace vigente.
+
+«Avísame si queda un hueco» guarda preferencias reales en la lista de espera. «Hablar con recepción» registra una solicitud de contacto; no es un chat en directo. Ambos se ofrecen sin menús de configuración para el paciente.
+
+Overview y Recepción incluyen «Pendiente de hoy»: confirmaciones, llegadas, conversaciones derivadas, solicitudes de contacto y avisos fallidos. Los avisos se pueden marcar revisados tras comprobarlos; no se reenvían automáticamente al pulsar. La búsqueda por nombre o teléfono abre la próxima cita o prepara una nueva con los datos existentes.
+
+**Estado del piloto:** en desarrollo las reservas se guardan en la base local. No se verifica todavía la propiedad del teléfono mediante código; el enlace permite gestionar únicamente su cita, nunca consultar el historial por teléfono. La entrega por WhatsApp depende de las credenciales y plantillas de Meta. En producción las API públicas permanecen desactivadas salvo `PUBLIC_BOOKING_ENABLED=true`; antes de activarlas, preparar la verificación del teléfono, la información de privacidad del centro y la entrega real de avisos. El enlace debe compartirse solo con su titular. Actualizar con `prisma migrate deploy` y regenerar Prisma antes de arrancar.

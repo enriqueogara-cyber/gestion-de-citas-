@@ -1,3 +1,4 @@
+import { dailyPanel, dailyScript } from "./dailyPanel";
 import { pageShell, escapeHtml, ClinicBranding, icon } from "./layout";
 import { DashboardStats } from "../services/reportingService";
 import { AuditEventView } from "../services/auditLog";
@@ -220,6 +221,7 @@ export function renderDashboardPage(
     <div class="stat-cell tone-neutral"><span class="stat-icon">${icon("list", { size: 13 })}</span><div class="stat-value">${stats.totalAppointments}</div><div class="stat-label">Citas gestionadas</div></div>
   </section>
 
+  ${dailyPanel}
   <section class="panel attention-panel${hasAttention ? (hasCriticalAttention ? " has-critical" : " has-items") : ""}">
     <h2>${attentionTitle}</h2>
     ${attentionCountLine}
@@ -401,6 +403,7 @@ export function renderDashboardPage(
   `;
 
   const bodyScript = `
+  ${dailyScript}
   async function refreshDashboard() {
     try {
       const res = await fetch("/simulator/api/dashboard");

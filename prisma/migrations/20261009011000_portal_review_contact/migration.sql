@@ -1,0 +1,2 @@
+ALTER TABLE "PortalAccess" ADD COLUMN "contactName" TEXT NOT NULL DEFAULT '';
+ALTER TABLE "PortalAccess" ADD COLUMN "contactPhone" TEXT NOT NULL DEFAULT '';

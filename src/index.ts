@@ -12,6 +12,7 @@ import { startScheduler } from "./scheduler/reminders";
 import { loadServiceCatalog } from "./services/serviceCatalog";
 import { logger } from "./lib/logger";
 import { patientRouter } from "./patient/router";
+import { dailyRouter } from "./simulator/dailyRouter";
 
 export const app = express();
 app.disable("x-powered-by");
@@ -26,7 +27,7 @@ app.get("/health", (_req, res) => {
 
 app.use(whatsappWebhookRouter);
 app.use("/reservar", patientRouter);
-app.use("/simulator", staffAccess, operationsRouter, simulatorRouter);
+app.use("/simulator", staffAccess, operationsRouter, dailyRouter, simulatorRouter);
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => { logger.error("request_failed", { err }); res.status(500).json({ error: "No se pudo completar la solicitud." }); });
 
 // Arranque asíncrono: el catálogo de servicios/horario (respaldado por DB,

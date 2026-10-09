@@ -342,3 +342,28 @@ model InboundMessage {
   createdAt DateTime @default(now())
   @@index([status, nextAttemptAt])
 }
+
+// A capability grants access to one web reservation only. Raw tokens are never stored.
+model PortalAccess {
+  tokenHash String @id
+  contactName String @default("")
+  contactPhone String @default("")
+  requestHash String
+  kind String
+  status String @default("PROCESSING")
+  appointmentId String?
+  waitlistId String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+}
+
+model ContactRequest {
+  id String @id @default(cuid())
+  name String
+  phone String
+  message String
+  status String @default("OPEN")
+  createdAt DateTime @default(now())
+  @@index([status, createdAt])
+}

@@ -1,3 +1,4 @@
+import { dailyPanel, dailyScript } from "./dailyPanel";
 import { pageShell, ClinicBranding } from "./layout";
 import { DateTime } from "luxon";
 import { clinicConfig } from "../config";
@@ -6,6 +7,7 @@ export function renderOperationsPage(clinic: ClinicBranding) {
     .operations{max-width:1200px;margin:auto}.toolbar,.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.toolbar{justify-content:space-between;margin-bottom:20px}label{display:flex;flex-direction:column;gap:5px;font-size:13px}input,select,textarea{background:var(--surface);color:var(--text-primary);border:1px solid var(--border-strong);border-radius:8px;padding:10px;font:inherit;max-width:100%;box-sizing:border-box}input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--brand)}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:16px 0}.agenda-item{display:grid;grid-template-columns:90px 1fr;gap:16px;padding:18px 0;border-bottom:1px solid var(--border)}.agenda-item h3{margin:0 0 5px}.agenda-item p{margin:5px 0 12px}.pending-review{color:var(--warning)}.conversation{border-bottom:1px solid var(--border);padding:20px 0}.messages{max-height:240px;overflow:auto;background:var(--surface-subtle);padding:12px;border-radius:8px;margin:12px 0;white-space:pre-wrap}.messages p{margin:8px 0}.error{color:var(--danger)}.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.kpi-grid strong{font-size:25px;display:block;margin:8px 0}.hint{font-size:12px;color:var(--text-secondary)}button{min-height:40px}.hidden{display:none}@media(max-width:700px){.form-grid,.kpi-grid{grid-template-columns:1fr 1fr}.agenda-item{grid-template-columns:1fr}.operations h1{font-size:26px}}@media(max-width:420px){.form-grid{grid-template-columns:1fr}.toolbar{align-items:stretch}}
   `, bodyHtml: `<div class="operations">
     <div class="toolbar"><div><h1>Recepción</h1><p class="muted">Agenda, asistencia y conversaciones del centro</p></div><button class="btn btn-ghost" id="logout">Cerrar sesión</button></div>
+    ${dailyPanel}
     <section class="panel"><div class="toolbar"><h2>Resultados</h2><label>Periodo<select id="period"><option value="month">Este mes</option><option value="week">Esta semana</option><option value="all">Todo el historial</option></select></label></div><div id="metrics" class="kpi-grid"></div><p class="hint">Las cifras corresponden a la fecha de la cita. Los cobros son importes registrados por recepción; no se procesan pagos.</p></section>
     <section class="panel"><div class="toolbar"><h2>Agenda del día</h2><div class="actions"><label>Día<input id="day" type="date"></label><label>Profesional<select id="professional"><option value="">Todos</option></select></label><button id="refresh" class="btn btn-ghost">Actualizar</button></div></div><div id="agenda" aria-live="polite">Cargando agenda…</div></section>
     <section class="panel"><h2>Nueva cita o cambio de cita</h2><p class="panel-desc">Pulsa «Cambiar» en una cita para conservarla hasta que el nuevo horario esté reservado.</p><form id="booking"><div class="form-grid"><label>Nombre<input name="name" required maxlength="80"></label><label>Teléfono<input name="phone" required placeholder="34600111222" pattern="[0-9]{7,15}"></label><label>Servicio<select name="serviceId" required></select></label><label>Profesional<select name="professionalId" required></select></label><label>Fecha y hora<input name="startsAt" type="datetime-local" required></label></div><div class="actions"><button class="btn btn-primary" id="saveBooking">Crear cita</button><button type="button" id="cancelEdit" class="btn btn-ghost hidden">Dejar de cambiar</button></div></form></section>
@@ -15,11 +17,12 @@ export function renderOperationsPage(clinic: ClinicBranding) {
     <section class="panel"><h2>Mensajes que necesitan revisión</h2><div id="failures"></div></section>
     <p class="error" id="pageError" role="alert"></p>
   </div>`, bodyScript: `
+  ${dailyScript}
   const el=id=>document.getElementById(id); let state, editing=null;
   const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const euro=v=>Number(v).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
   async function api(url,body){const r=await fetch('/simulator/api/'+url,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.error||'No se pudo completar la acción.');return d;}
-  async function act(fn){try{el('pageError').textContent='';await fn();await load();toast('Cambio guardado');}catch(e){el('pageError').textContent=e.message;toast(e.message,'error');}}
+  async function act(fn){try{el('pageError').textContent='';await fn();await load();window.dispatchEvent(new Event('clinic-agenda-changed'));toast('Cambio guardado');}catch(e){el('pageError').textContent=e.message;toast(e.message,'error');}}
   function options(pros){return pros.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');}
   function servicePros(){const id=el('booking').elements.serviceId.value;const pros=state.professionals.filter(p=>p.serviceIds.includes(id));el('booking').elements.professionalId.innerHTML=options(pros);el('saveBooking').disabled=!pros.length;}
   async function load(){
@@ -53,6 +56,15 @@ export function renderOperationsPage(clinic: ClinicBranding) {
   el('staff').onsubmit=e=>{e.preventDefault();act(async()=>{await api('staff',Object.fromEntries(new FormData(e.target)));e.target.reset();});};
   el('backup').onclick=()=>act(()=>api('backup',{}));el('logout').onclick=async()=>{await api('logout',{});location.href='/auth/login';};
   ['day','professional','period'].forEach(id=>el(id).onchange=()=>load().catch(e=>el('pageError').textContent=e.message));el('refresh').onclick=()=>load().catch(e=>el('pageError').textContent=e.message);
-  el('day').value=${JSON.stringify(DateTime.now().setZone(clinicConfig.timezone).toISODate())};load().catch(e=>el('pageError').textContent=e.message);
+  window.addEventListener('clinic-daily-changed',()=>load().catch(e=>el('pageError').textContent=e.message));
+  async function start(){
+    el('day').value=${JSON.stringify(DateTime.now().setZone(clinicConfig.timezone).toISODate())};
+    const params=new URLSearchParams(location.search);let a=null;
+    if(params.get('appointment')){a=await api('appointments/'+encodeURIComponent(params.get('appointment')));el('day').value=a.localStart.slice(0,10);}
+    await load();
+    if(a){const button=document.querySelector('[data-edit="'+a.id+'"]');if(button)button.click();else el('agenda').scrollIntoView();}
+    if(params.get('patient')){const p=await api('patients/'+encodeURIComponent(params.get('patient')));el('booking').elements.name.value=p.name||'';el('booking').elements.phone.value=p.phone;el('booking').scrollIntoView({behavior:'smooth'});}
+  }
+  start().catch(e=>el('pageError').textContent=e.message);
   ` });
 }

@@ -248,6 +248,12 @@ export async function rescheduleAppointment(params: {
     );
   }
 
+  // Links issued by reception or the patient portal follow the replacement.
+  await prisma.portalAccess.updateMany({
+    where: { appointmentId: old.id, revokedAt: null },
+    data: { appointmentId: newAppt.id },
+  });
+
   await recordEvent("APPOINTMENT_RESCHEDULED", {
     patientId: params.patientId,
     appointmentId: newAppt.id,
