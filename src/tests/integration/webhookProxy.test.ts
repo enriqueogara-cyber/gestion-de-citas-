@@ -4,13 +4,14 @@ import { createHmac } from "node:crypto";
 import { AddressInfo } from "node:net";
 import { app } from "../../index";
 import { prisma } from "../../db/client";
+import { logger } from "../../lib/logger";
 import { cleanTransactionalData } from "./setup";
 
 const { createWebhookProxy } = require("../../../scripts/webhookProxy.js") as {
   createWebhookProxy: (options: { backendPort: number }) => import("node:http").Server;
 };
 
-const envNames = ["WHATSAPP_APP_SECRET", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_ALLOWED_TEST_NUMBERS", "WHATSAPP_SEND_ENABLED"] as const;
+const envNames = ["WHATSAPP_APP_SECRET", "WHATSAPP_VERIFY_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_ALLOWED_TEST_NUMBERS", "WHATSAPP_SEND_ENABLED", "WHATSAPP_INBOUND_PROBE_ENABLED"] as const;
 const saved = Object.fromEntries(envNames.map(name => [name, process.env[name]]));
 const secret = "proxy-test-secret-only";
 const fakePhone = "34900000123";
@@ -23,6 +24,7 @@ describe("proxy local dedicado al webhook", () => {
     process.env.WHATSAPP_PHONE_NUMBER_ID = "proxy-test-number-id";
     process.env.WHATSAPP_ALLOWED_TEST_NUMBERS = fakePhone;
     process.env.WHATSAPP_SEND_ENABLED = "false";
+    process.env.WHATSAPP_INBOUND_PROBE_ENABLED = "false";
   });
   after(() => {
     for (const name of envNames) {
@@ -70,8 +72,22 @@ describe("proxy local dedicado al webhook", () => {
 
       const inbound = Buffer.from(JSON.stringify({ object: "whatsapp_business_account", entry: [{ changes: [{ field: "messages", value: { metadata: { phone_number_id: "proxy-test-number-id" }, messages: [{ id: "wamid.disabled", from: fakePhone, type: "text", timestamp: "1760000000", text: { body: "Hola" } }] } }] }] }));
       const inboundSig = "sha256=" + createHmac("sha256", secret).update(inbound).digest("hex");
-      assert.equal((await send(inbound, inboundSig)).status, 200);
-      assert.equal(await prisma.inboundMessage.count(), 0); // Piloto apagado.
+      const observed: Array<{ event: string; meta?: Record<string, unknown> }> = [];
+      const originalInfo = logger.info;
+      logger.info = (event, meta) => { if (event === "whatsapp_test_inbound_received") observed.push({ event, meta }); else originalInfo(event, meta); };
+      process.env.WHATSAPP_INBOUND_PROBE_ENABLED = "true";
+      try {
+        assert.equal((await send(inbound, "sha256=invalid")).status, 403);
+        assert.equal((await send(inbound, inboundSig)).status, 200);
+        const other = Buffer.from(inbound.toString().replace(fakePhone, "34900000999"));
+        const otherSig = "sha256=" + createHmac("sha256", secret).update(other).digest("hex");
+        assert.equal((await send(other, otherSig)).status, 200);
+        assert.deepEqual(observed, [{ event: "whatsapp_test_inbound_received", meta: { count: 1 } }]);
+        assert.equal(await prisma.inboundMessage.count(), 0); // Piloto apagado.
+      } finally {
+        logger.info = originalInfo;
+        process.env.WHATSAPP_INBOUND_PROBE_ENABLED = "false";
+      }
     } finally {
       await new Promise<void>((resolve, reject) => proxy.close(error => error ? reject(error) : resolve()));
       await new Promise<void>((resolve, reject) => backend.close(error => error ? reject(error) : resolve()));

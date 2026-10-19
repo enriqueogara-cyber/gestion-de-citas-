@@ -63,6 +63,8 @@ El backend usa el puerto **3000** y el proxy limitado a `/webhook` usa el **3101
 
 Mientras `WHATSAPP_SEND_ENABLED=false`, los mensajes entrantes firmados no activan al agente y no se envían respuestas. La verificación GET y la recepción de estados firmados sí funcionan. Mantén ambas opciones (`PUBLIC_BOOKING_ENABLED` y `WHATSAPP_SEND_ENABLED`) en `false` durante esta preparación.
 
+Para comprobar únicamente la recepción de un texto desde el número de prueba autorizado, se puede iniciar temporalmente el backend con `WHATSAPP_INBOUND_PROBE_ENABLED=true` y los dos interruptores anteriores en `false`. Tras verificar la firma y el número permitido, el backend registra solo el evento `whatsapp_test_inbound_received` y la cantidad de mensajes del webhook: no registra el texto, el teléfono, el identificador del mensaje ni secretos; tampoco crea reservas ni responde. El indicador está desactivado por defecto. Retíralo al terminar la prueba.
+
 ## 4. Configurar el servidor sin publicar credenciales
 
 Aplica primero la migración de base de datos: `npx prisma migrate deploy`. En el entorno de prueba, copia los nombres de `.env.example` a una configuración privada y rellena `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_BUSINESS_ACCOUNT_ID`, `WHATSAPP_VERIFY_TOKEN` y `WHATSAPP_APP_SECRET`. Mantén `WHATSAPP_GRAPH_VERSION=v26.0`, `WHATSAPP_TEMPLATE_LANGUAGE=es` y ajusta los cinco nombres de plantilla si los aprobados en Meta son distintos. No compartas el archivo `.env`.
