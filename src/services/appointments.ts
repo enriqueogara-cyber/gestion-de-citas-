@@ -1,4 +1,5 @@
 import { DateTime } from "luxon";
+import type { Appointment } from "@prisma/client";
 import { prisma } from "../db/client";
 import { deleteCalendarEvent, findAvailableSlots } from "../calendar";
 import {
@@ -124,11 +125,17 @@ export async function cancelAppointment(appointmentId: string, patientId: string
   const result = await transitionAppointment(appointmentId, patientId, "CANCELLED");
   if (!result.ok) throw new BookingValidationError(result.reason, result.code);
   const appt = result.appointment;
+  await finishCancellation(appt, patientId);
+  return appt;
+}
 
+/** Efectos posteriores al commit. Ninguno puede deshacer una cancelación ya confirmada. */
+async function finishCancellation(appt: Appointment, patientId: string): Promise<void> {
   if (appt.googleEventId) {
     try {
       await deleteCalendarEvent(appt.googleEventId);
     } catch (err) {
+      logger.error("cancel_calendar_delete_failed", { appointmentId: appt.id, err });
       await recordEvent("CALENDAR_SYNC_FAILED", {
         appointmentId: appt.id,
         metadata: { action: "delete", message: (err as Error)?.message },
@@ -139,13 +146,22 @@ export async function cancelAppointment(appointmentId: string, patientId: string
   await recordEvent("APPOINTMENT_CANCELLED", { patientId, appointmentId: appt.id, metadata: { service: appt.service } });
 
   // Sus recordatorios pendientes ya no tienen sentido.
-  await cancelJobsForAppointment(appt.id);
+  try {
+    await cancelJobsForAppointment(appt.id);
+  } catch (err) {
+    // El cambio de estado ya se confirmó. Los handlers de recordatorios
+    // comprueban el estado de la cita antes de enviar nada.
+    logger.error("cancel_reminder_cleanup_failed", { appointmentId: appt.id, err });
+  }
 
   // Liberar el hueco: si alguien lo esperaba en lista de espera compatible,
   // se le avisa ya mismo (ver services/waitlistOrchestrator.ts).
-  await offerFreedSlot(appt.service, DateTime.fromJSDate(appt.startsAt), appt.professionalId);
+  try {
+    await offerFreedSlot(appt.service, DateTime.fromJSDate(appt.startsAt), appt.professionalId);
+  } catch (err) {
+    logger.error("cancel_waitlist_offer_failed", { appointmentId: appt.id, err });
+  }
 
-  return appt;
 }
 
 export async function confirmAppointment(appointmentId: string, patientId: string) {
@@ -163,17 +179,11 @@ export async function confirmAppointment(appointmentId: string, patientId: strin
  * vieja y luego resulta que no puedo crear la nueva", que dejaría al
  * paciente sin cita.
  *
- * Si la cancelación de la vieja fallara DESPUÉS de crear la nueva (no
- * debería — ya se comprobó su estado antes — pero por si acaso), hay un
- * segundo nivel de compensación en vez de dejar dos citas activas
- * silenciosamente:
- *  1. Se intenta cancelar la cita NUEVA para volver exactamente al estado
- *     de partida (el paciente conserva la original) y se informa del fallo.
- *  2. Si ni siquiera esa compensación funciona, queda un estado realmente
- *     inconsistente (dos citas activas para el mismo cambio): se registra
- *     un evento `RESCHEDULE_INCONSISTENT` (aparece en "Necesita atención"
- *     del Overview) y se lanza un error — nunca se le dice al paciente que
- *     el cambio salió bien cuando no se sabe con certeza que así fue.
+ * Si cancelar la vieja devuelve error, se consulta su estado persistido:
+ * si ya está CANCELLED se conserva la nueva; si sigue activa, se cancela
+ * la nueva y se comprueba el resultado de esa compensación. Solo se afirma
+ * que la original sigue en pie cuando ambas lecturas lo demuestran. Los
+ * estados ambiguos se registran para revisión humana.
  */
 export async function rescheduleAppointment(params: {
   appointmentId: string;
@@ -211,41 +221,60 @@ export async function rescheduleAppointment(params: {
   } catch (cancelOldErr) {
     logger.error("reschedule_old_cancel_failed", { oldAppointmentId: old.id, newAppointmentId: newAppt.id, err: cancelOldErr });
 
-    let compensated = false;
-    try {
-      await cancelAppointment(newAppt.id, params.patientId);
-      compensated = true;
-    } catch (compErr) {
-      logger.error("reschedule_compensation_failed", { oldAppointmentId: old.id, newAppointmentId: newAppt.id, err: compErr });
+    // Una excepción no prueba que el cambio de estado haya fallado: puede
+    // haberse confirmado antes de fallar una lectura o un efecto posterior.
+    const oldNow = await prisma.appointment.findUnique({ where: { id: old.id } });
+    if (oldNow?.status === "CANCELLED") {
+      logger.warn("reschedule_old_cancel_committed", { oldAppointmentId: old.id, newAppointmentId: newAppt.id });
+    } else if (oldNow && ["PENDING_CONFIRMATION", "CONFIRMED"].includes(oldNow.status)) {
+      try {
+        // La lectura de la cita antigua y la cancelación de la nueva se
+        // serializan en SQLite. Si otra cancelación gana antes, esta
+        // transacción no compensa y el caso queda para revisión humana.
+        const compensated = await prisma.$transaction(async (tx) => {
+          const oldInTx = await tx.appointment.findUnique({ where: { id: old.id } });
+          if (!oldInTx || !["PENDING_CONFIRMATION", "CONFIRMED"].includes(oldInTx.status)) return null;
+          const newInTx = await tx.appointment.findUnique({ where: { id: newAppt.id } });
+          if (!newInTx || !["PENDING_CONFIRMATION", "CONFIRMED"].includes(newInTx.status)) return null;
+          const changed = await tx.appointment.updateMany({
+            where: { id: newAppt.id, patientId: params.patientId, status: newInTx.status },
+            data: { status: "CANCELLED" },
+          });
+          if (!changed.count) return null;
+          await tx.scheduledJob.updateMany({ where: { appointmentId: newAppt.id, status: "PENDING" }, data: { status: "CANCELLED" } });
+          return tx.appointment.findUniqueOrThrow({ where: { id: newAppt.id } });
+        });
+        if (compensated) await finishCancellation(compensated, params.patientId);
+      } catch (compErr) {
+        logger.error("reschedule_compensation_failed", { oldAppointmentId: old.id, newAppointmentId: newAppt.id, err: compErr });
+      }
+      const newNow = await prisma.appointment.findUnique({ where: { id: newAppt.id } });
+      const oldAfterCompensation = await prisma.appointment.findUnique({ where: { id: old.id } });
+
+      if (newNow?.status === "CANCELLED" && oldAfterCompensation && ["PENDING_CONFIRMATION", "CONFIRMED"].includes(oldAfterCompensation.status)) {
+        await recordEvent("AGENT_ERROR", {
+          patientId: params.patientId,
+          appointmentId: old.id,
+          metadata: { phase: "reschedule_compensated", newAppointmentId: newAppt.id },
+        });
+        throw new BookingValidationError(
+          "No se ha podido completar el cambio de cita; tu cita original sigue en pie tal cual estaba.",
+          "INVALID_STATE"
+        );
+      }
     }
 
-    if (compensated) {
-      await recordEvent("AGENT_ERROR", {
+    if (oldNow?.status !== "CANCELLED") {
+      await recordEvent("RESCHEDULE_INCONSISTENT", {
         patientId: params.patientId,
-        appointmentId: old.id,
-        metadata: { phase: "reschedule_compensated", newAppointmentId: newAppt.id },
+        appointmentId: newAppt.id,
+        metadata: { oldAppointmentId: old.id, message: "No se pudo confirmar la cancelación antigua ni compensar la nueva." },
       });
       throw new BookingValidationError(
-        "No se ha podido completar el cambio de cita; tu cita original sigue en pie tal cual estaba.",
+        "Ha habido un problema cambiando tu cita — el centro va a revisarlo y te contactará si hace falta algo por tu parte.",
         "INVALID_STATE"
       );
     }
-
-    // Compensación también falló: estado de verdad inconsistente (dos
-    // citas activas). Un humano tiene que revisarlo — nunca decimos al
-    // paciente que el cambio salió bien.
-    await recordEvent("RESCHEDULE_INCONSISTENT", {
-      patientId: params.patientId,
-      appointmentId: newAppt.id,
-      metadata: {
-        oldAppointmentId: old.id,
-        message: "Cancelación de la cita antigua y compensación (cancelar la nueva) fallaron ambas.",
-      },
-    });
-    throw new BookingValidationError(
-      "Ha habido un problema cambiando tu cita — el centro va a revisarlo y te contactará si hace falta algo por tu parte.",
-      "INVALID_STATE"
-    );
   }
 
   // Links issued by reception or the patient portal follow the replacement.

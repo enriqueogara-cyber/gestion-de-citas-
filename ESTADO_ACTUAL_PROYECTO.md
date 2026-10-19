@@ -1,5 +1,7 @@
 # Estado actual del proyecto de gestión de citas
 
+> **Actualización posterior:** la primera fase de corrección de consistencia está documentada en [RESUMEN_FASE_1_PILOTO.md](RESUMEN_FASE_1_PILOTO.md). Este informe conserva la fotografía técnica anterior a esos cambios.
+
 **Fecha de revisión:** 19 de octubre de 2026. **Base examinada:** rama `main`, commit `5869d25` antes de añadir este informe. **Método:** lectura del código y esquema, comprobación de configuración sin revelar valores secretos y ejecución local de pruebas. Este documento describe el software observado, no certifica un servicio desplegado ni una auditoría legal o de seguridad completa.
 
 ## Resumen para decidir

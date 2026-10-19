@@ -92,13 +92,13 @@ export async function scheduleWaitlistExpiryJob(params: {
   waitlistEntryId: string;
   slotStartIso: string;
   expiresAt: Date;
-}): Promise<void> {
+}, db: Prisma.TransactionClient = prisma): Promise<void> {
   await scheduleJob({
     type: "WAITLIST_OFFER_EXPIRED",
     scheduledAt: params.expiresAt,
     waitlistEntryId: params.waitlistEntryId,
-    idempotencyKey: `waitlistExpiry:${params.waitlistEntryId}:${params.slotStartIso}`,
-  });
+    idempotencyKey: `waitlistExpiry:${params.waitlistEntryId}:${params.slotStartIso}:${params.expiresAt.toISOString()}`,
+  }, db);
 }
 
 /** Si la oferta se acepta/rechaza antes de caducar, el job de caducidad ya no debe dispararse. */

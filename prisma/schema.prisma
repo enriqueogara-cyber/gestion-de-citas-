@@ -138,6 +138,7 @@ model WaitlistEntry {
   offeredSlotStart DateTime?
   offeredEndAt     DateTime?
   offerExpiresAt   DateTime?
+  offeredProfessionalId String? // profesional del hueco liberado; distinto de la preferencia del paciente
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

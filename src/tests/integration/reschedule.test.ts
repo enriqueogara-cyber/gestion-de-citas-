@@ -156,13 +156,28 @@ test("TEST 8: si además falla la propia compensación, se registra RESCHEDULE_I
   const newStart = monday.plus({ hours: 1 });
 
   const originalUpdateMany = prisma.appointment.updateMany.bind(prisma.appointment);
+  const originalTransaction = prisma.$transaction.bind(prisma);
   (prisma.appointment as any).updateMany = async (args: any) => {
-    // Falla CUALQUIER cancelación (la de la vieja y la de la compensación).
+    // Falla la cancelación inicial, fuera de la transacción de compensación.
     if (args?.data?.status === "CANCELLED") {
       throw new Error("DB write failed (simulado)");
     }
     return originalUpdateMany(args);
   };
+  (prisma as any).$transaction = (fn: any) => originalTransaction((tx: any) => fn(new Proxy(tx, {
+    get(target, property) {
+      if (property === "appointment") return new Proxy(target.appointment, {
+        get(model, method) {
+          if (method === "updateMany") return async (args: any) => {
+            if (args?.data?.status === "CANCELLED") throw new Error("DB write failed (simulado)");
+            return model.updateMany(args);
+          };
+          return Reflect.get(model, method);
+        },
+      });
+      return Reflect.get(target, property);
+    },
+  })));
 
   try {
     await assert.rejects(
@@ -189,6 +204,66 @@ test("TEST 8: si además falla la propia compensación, se registra RESCHEDULE_I
     assert.equal(meta.oldAppointmentId, original.id);
   } finally {
     (prisma.appointment as any).updateMany = originalUpdateMany;
+    (prisma as any).$transaction = originalTransaction;
+  }
+});
+
+test("si falla un efecto posterior a cancelar la cita antigua, el cambio conserva la nueva cita", async () => {
+  const patient = await makePatient("post-cancel");
+  const start = nextWeekday(1).set({ hour: 10, minute: 0 });
+  const original = await bookAppointment({ patientId: patient.id, patientName: "X", patientPhone: patient.phone, serviceId: "revision", start });
+  const originalUpdateMany = prisma.scheduledJob.updateMany.bind(prisma.scheduledJob);
+  (prisma.scheduledJob as any).updateMany = async (args: any) => {
+    if (args?.where?.appointmentId === original.id) throw new Error("fallo simulado después de cancelar");
+    return originalUpdateMany(args);
+  };
+  try {
+    const moved = await rescheduleAppointment({
+      appointmentId: original.id, patientId: patient.id, patientName: "X", patientPhone: patient.phone,
+      newStart: start.plus({ hours: 1 }),
+    });
+    assert.equal((await prisma.appointment.findUniqueOrThrow({ where: { id: original.id } })).status, "CANCELLED");
+    assert.equal((await prisma.appointment.findUniqueOrThrow({ where: { id: moved.id } })).status, "PENDING_CONFIRMATION");
+  } finally {
+    (prisma.scheduledJob as any).updateMany = originalUpdateMany;
+  }
+});
+
+test("si la cita antigua cambia durante la compensación, no se afirma que siga activa", async () => {
+  const patient = await makePatient("compensation-race");
+  const start = nextWeekday(2).set({ hour: 10, minute: 0 });
+  const original = await bookAppointment({ patientId: patient.id, patientName: "X", patientPhone: patient.phone, serviceId: "revision", start });
+  const originalUpdateMany = prisma.appointment.updateMany.bind(prisma.appointment);
+  const originalTransaction = prisma.$transaction.bind(prisma);
+  let initialFailure = false;
+  let concurrentCancellation = false;
+  (prisma.appointment as any).updateMany = async (args: any) => {
+    if (args?.where?.id === original.id && args?.data?.status === "CANCELLED" && !initialFailure) {
+      initialFailure = true;
+      throw new Error("primer intento de cancelación fallido");
+    }
+    return originalUpdateMany(args);
+  };
+  (prisma as any).$transaction = async (fn: any) => {
+    if (initialFailure && !concurrentCancellation) {
+      concurrentCancellation = true;
+      await originalUpdateMany({ where: { id: original.id, status: "PENDING_CONFIRMATION" }, data: { status: "CANCELLED" } });
+    }
+    return originalTransaction(fn);
+  };
+  try {
+    await assert.rejects(
+      () => rescheduleAppointment({ appointmentId: original.id, patientId: patient.id, patientName: "X", patientPhone: patient.phone, newStart: start.plus({ hours: 1 }) }),
+      /el centro va a revisarlo/
+    );
+    assert.equal((await prisma.appointment.findUniqueOrThrow({ where: { id: original.id } })).status, "CANCELLED");
+    const newRows = await prisma.appointment.findMany({ where: { patientId: patient.id, startsAt: start.plus({ hours: 1 }).toJSDate() } });
+    assert.equal(newRows.length, 1);
+    assert.equal(newRows[0].status, "PENDING_CONFIRMATION", "la compensación no debe cancelar la nueva si la antigua ya cambió");
+    assert.equal(await prisma.auditLog.count({ where: { type: "RESCHEDULE_INCONSISTENT", patientId: patient.id } }), 1);
+  } finally {
+    (prisma.appointment as any).updateMany = originalUpdateMany;
+    (prisma as any).$transaction = originalTransaction;
   }
 });
 

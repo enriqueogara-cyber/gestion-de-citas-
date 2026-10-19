@@ -139,6 +139,8 @@ export interface BookingRequest {
   professionalId?: string;
   /** true si esta reserva nace de aceptar una oferta de lista de espera. */
   recoveredFromWaitlist?: boolean;
+  /** Oferta concreta reclamada; se valida en la misma transacción que la cita. */
+  waitlistEntryId?: string;
   /**
    * Id de una cita del propio paciente a ignorar al comprobar solapamientos.
    * Lo usa domain/reschedule.ts: si el nuevo horario se solapa con la cita
@@ -215,6 +217,14 @@ export async function reserveAppointment(req: BookingRequest) {
   const candidates = qualifiedList;
 
   const appointment = await prisma.$transaction(async (tx) => {
+    if (req.waitlistEntryId) {
+      const offer = await tx.waitlistEntry.findUnique({ where: { id: req.waitlistEntryId } });
+      if (!offer || offer.patientId !== req.patientId || offer.status !== "ACCEPTING" ||
+          offer.offeredSlotStart?.getTime() !== req.start.toJSDate().getTime() ||
+          (offer.offeredProfessionalId && offer.offeredProfessionalId !== (req.professionalId ?? null))) {
+        throw new BookingValidationError("Esa oferta ya no está disponible.");
+      }
+    }
     const eligibleNow = await tx.professional.findMany({ where: { clinicId: "default", active: true, id: { in: candidates.map(p => p.id) } } });
     const stillQualified = eligibleNow.filter(p => { try { return JSON.parse(p.serviceIds).includes(req.serviceId); } catch { return false; } });
     if (!stillQualified.length || (requestedProfessional && !stillQualified.some(p => p.id === requestedProfessional!.id))) throw new BookingValidationError("No hay un profesional elegible para ese servicio.", "PROFESSIONAL_NOT_AVAILABLE");

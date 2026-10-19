@@ -1,6 +1,5 @@
 import { DateTime } from "luxon";
 import { prisma } from "../db/client";
-import { clinicConfig } from "../config";
 import { isCandidateCompatible, timeOfDayOf } from "../domain/waitlistMatching";
 import { computeSlotsFromBusy } from "../calendar/slots";
 import { recordEvent } from "./auditLog";
@@ -88,19 +87,6 @@ export async function nextWaitingCandidate(
   return waiting.find((entry) => isCandidateCompatible(entry, slotStart, slotProfessionalId)) ?? null;
 }
 
-export async function markOffered(entryId: string, slotStart: DateTime, slotEnd: DateTime) {
-  const expires = DateTime.now().plus({ minutes: clinicConfig.waitlistOfferWindowMinutes });
-  return prisma.waitlistEntry.update({
-    where: { id: entryId },
-    data: {
-      status: "OFFERED",
-      offeredSlotStart: slotStart.toJSDate(),
-      offeredEndAt: slotEnd.toJSDate(),
-      offerExpiresAt: expires.toJSDate(),
-    },
-  });
-}
-
 /**
  * Compare-and-swap: solo pasa de OFFERED a ACCEPTING si sigue en OFFERED en
  * ese instante. Evita que dos aceptaciones simultáneas (o una aceptación a
@@ -109,7 +95,7 @@ export async function markOffered(entryId: string, slotStart: DateTime, slotEnd:
  */
 export async function tryClaimOffer(entryId: string): Promise<boolean> {
   const result = await prisma.waitlistEntry.updateMany({
-    where: { id: entryId, status: "OFFERED" },
+    where: { id: entryId, status: "OFFERED", offerExpiresAt: { gt: new Date() } },
     data: { status: "ACCEPTING" },
   });
   return result.count === 1;
@@ -130,14 +116,31 @@ export async function markExpired(entryId: string) {
 export async function markBackToWaiting(entryId: string) {
   return prisma.waitlistEntry.update({
     where: { id: entryId },
-    data: { status: "WAITING", offeredSlotStart: null, offeredEndAt: null, offerExpiresAt: null },
+    data: { status: "WAITING", offeredSlotStart: null, offeredEndAt: null, offerExpiresAt: null, offeredProfessionalId: null },
   });
 }
 
 export async function cancelWaitlistEntry(entryId: string, patientId: string) {
   const entry = await prisma.waitlistEntry.findUnique({ where: { id: entryId } });
   if (!entry || entry.patientId !== patientId) throw new Error("No encuentro esa lista de espera para este paciente.");
-  return prisma.waitlistEntry.update({ where: { id: entryId }, data: { status: "CANCELLED" } });
+  if (entry.status === "ACCEPTING") throw new Error("La oferta se está confirmando; comprueba su estado antes de cancelarla.");
+  if (!["WAITING", "OFFERED", "CANCELLED"].includes(entry.status)) throw new Error("Esa entrada ya se resolvió; comprueba tus citas.");
+  const cancelled = await prisma.$transaction(async (tx) => {
+    const changed = await tx.waitlistEntry.updateMany({ where: { id: entryId, patientId, status: entry.status }, data: { status: "CANCELLED" } });
+    if (!changed.count) throw new Error("La oferta ha cambiado de estado; vuelve a comprobarla.");
+    const updated = await tx.waitlistEntry.findUniqueOrThrow({ where: { id: entryId } });
+    if (entry.offeredSlotStart && entry.offerExpiresAt && ["OFFERED", "CANCELLED"].includes(entry.status)) {
+      await tx.slotHold.deleteMany({ where: { patientId, startsAt: entry.offeredSlotStart, expiresAt: entry.offerExpiresAt, reason: "WAITLIST_OFFER" } });
+    }
+    return updated;
+  });
+  if (entry.offeredSlotStart && ["OFFERED", "CANCELLED"].includes(entry.status)) {
+    // El job de caducidad permanece pendiente como respaldo de recuperación.
+    // Si el encadenado falla, podrá continuarlo tras un reinicio.
+    const { offerFreedSlot } = await import("./waitlistOrchestrator");
+    await offerFreedSlot(entry.service, DateTime.fromJSDate(entry.offeredSlotStart), entry.offeredProfessionalId ?? entry.professionalId);
+  }
+  return cancelled;
 }
 
 
