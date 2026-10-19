@@ -30,7 +30,17 @@ export interface AgentContext {
   patientId: string;
   phone: string;
   name: string;
+  identitySource?: "signed_whatsapp" | "local_demo";
 }
+
+async function authorizedPatient(ctx: AgentContext) {
+  if (ctx.identitySource !== "signed_whatsapp" && ctx.identitySource !== "local_demo") return false;
+  if (ctx.identitySource === "local_demo" && !ctx.phone.startsWith("demo-")) return false;
+  const patient = await prisma.patient.findUnique({ where: { id: ctx.patientId }, select: { phone: true } });
+  return patient?.phone === ctx.phone;
+}
+
+const patientTools = new Set(["book_appointment", "reschedule_appointment", "cancel_appointment", "confirm_appointment", "join_waitlist", "accept_waitlist_offer", "cancel_waitlist_entry", "request_human_handoff"]);
 
 // Formato genérico (JSON Schema) que se traduce a "function calling" estilo
 // OpenAI al llamar a OpenRouter (ver agent/claude.ts). Es lo que el modelo
@@ -251,6 +261,10 @@ export async function executeTool(toolName: string, rawInput: any, ctx: AgentCon
   }
   const input = parsed.data as any;
 
+  if (patientTools.has(toolName) && !(await authorizedPatient(ctx))) {
+    return { text: "ERROR: verifica tu identidad antes de consultar o gestionar citas. Contacta con recepción." };
+  }
+
   await recordEvent("AI_TOOL_CALLED", { patientId: ctx.patientId, metadata: { tool: toolName } });
 
   switch (toolName) {
@@ -447,6 +461,7 @@ export async function executeTool(toolName: string, rawInput: any, ctx: AgentCon
  * siempre el texto ya formateado, nunca el id ni una fecha recalculada.
  */
 export async function describePatientState(ctx: AgentContext): Promise<string> {
+  if (!(await authorizedPatient(ctx))) return "Citas del paciente: identidad sin verificar. No se pueden consultar ni gestionar citas.";
   const [appointments, waitlist] = await Promise.all([
     listUpcomingAppointments(ctx.patientId),
     listWaitlistForPatient(ctx.patientId),
@@ -455,15 +470,14 @@ export async function describePatientState(ctx: AgentContext): Promise<string> {
   const apptLines = appointments.length
     ? appointments.map(
         (a) =>
-          `- appointment_id=${a.id} · ${serviceLabel(a.service)} · ${formatLong(a.startsAt)} · estado=${a.status}` +
-          (a.professional ? ` · profesional=${a.professional.name}` : "")
+          `- appointment_id=${a.id} · ${formatLong(a.startsAt)} · estado=${a.status}`
       )
     : ["(sin citas próximas)"];
 
   const waitLines = waitlist.length
     ? waitlist.map(
         (w) =>
-          `- waitlist_entry_id=${w.id} · ${serviceLabel(w.service)} · estado=${w.status}` +
+          `- waitlist_entry_id=${w.id} · estado=${w.status}` +
           (w.offeredSlotStart ? ` · hueco_ofrecido=${formatLong(w.offeredSlotStart)}` : "")
       )
     : ["(sin listas de espera activas)"];

@@ -7,13 +7,15 @@ import { buildSystemPrompt } from "./prompts";
 import { recordEvent } from "../services/auditLog";
 import { recordLlmCall } from "../services/llmStats";
 import { logger } from "../lib/logger";
+import { requestHandoff } from "../services/reception";
+import { containsClinicalText, minimizeForModel } from "./privacy";
 
 // OpenRouter expone una API compatible con la de OpenAI (chat completions +
 // function calling), y permite pagar con tarjeta normal sin pedir IBAN ni
 // datos de empresa. Documentación: https://openrouter.ai/docs
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-const HISTORY_MESSAGES_LIMIT = 20; // últimos N mensajes de contexto por conversación
+const HISTORY_MESSAGES_LIMIT = 8; // mínimo contexto necesario; texto filtrado antes del proveedor
 const MAX_TOOL_ITERATIONS = 6; // corta bucles de herramientas descontrolados
 const FALLBACK_REPLY =
   "Perdona, ahora mismo no puedo consultar la agenda. Inténtalo de nuevo en unos segundos o, si es urgente, llama directamente al centro.";
@@ -62,7 +64,7 @@ async function loadHistory(patientId: string): Promise<ChatMessage[]> {
   });
   return rows
     .reverse()
-    .map((r) => ({ role: r.role as "user" | "assistant", content: r.content }));
+    .map((r) => ({ role: r.role as "user" | "assistant", content: minimizeForModel(r.content) }));
 }
 
 async function saveMessage(patientId: string, role: "user" | "assistant", content: string) {
@@ -133,13 +135,19 @@ async function handleMessageLocked(ctx: AgentContext, userText: string): Promise
 
   const patient = await prisma.patient.findUniqueOrThrow({ where: { id: ctx.patientId } });
   if (patient.aiPaused) return { reply: "", handoffReason: patient.handoffReason || "Atención humana" };
+  if (containsClinicalText(userText)) {
+    await requestHandoff(ctx.patientId, "Consulta clínica para revisión humana");
+    const reply = "He avisado al equipo del centro para que revise tu consulta. Si es urgente, llama directamente al centro.";
+    await saveMessage(ctx.patientId, "assistant", reply);
+    return { reply, handoffReason: "Consulta clínica para revisión humana" };
+  }
   try {
     const result = await runAgentLoop(ctx, userText);
     await saveMessage(ctx.patientId, "assistant", result.reply);
     return result;
   } catch (err) {
-    logger.error("agent_loop_failed", { patientId: ctx.patientId, err });
-    await recordEvent("AGENT_ERROR", { patientId: ctx.patientId, metadata: { message: (err as Error)?.message } });
+    logger.error("agent_loop_failed", { patientId: ctx.patientId, errorType: (err as Error)?.name });
+    await recordEvent("AGENT_ERROR", { patientId: ctx.patientId, metadata: { phase: "agent_loop" } });
     await saveMessage(ctx.patientId, "assistant", FALLBACK_REPLY);
     return { reply: FALLBACK_REPLY };
   }
@@ -174,10 +182,10 @@ async function runAgentLoop(ctx: AgentContext, userText: string): Promise<AgentR
         resultText = result.text;
         if (result.handoffReason) return { reply: "He avisado al equipo del centro para que revise tu consulta. Si es urgente, llama directamente al centro.", handoffReason: result.handoffReason };
       } catch (err) {
-        logger.error("tool_execution_failed", { tool: call.function.name, err });
+        logger.error("tool_execution_failed", { tool: call.function.name, errorType: (err as Error)?.name });
         resultText = `ERROR: no se pudo ejecutar ${call.function.name} ahora mismo. Informa al paciente con naturalidad y sugiere reintentarlo.`;
       }
-      messages.push({ role: "tool", tool_call_id: call.id, content: resultText });
+      messages.push({ role: "tool", tool_call_id: call.id, content: minimizeForModel(resultText) });
     }
   }
 

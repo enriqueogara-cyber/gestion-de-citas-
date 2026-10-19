@@ -303,7 +303,7 @@ simulatorRouter.post("/api/message", llmRateLimit, async (req: Request, res: Res
   try {
     const patient = await findOrCreatePatient(demoPhone(sessionId), "Paciente Demo");
     const result = await handleIncomingMessage(
-      { patientId: patient.id, phone: patient.phone, name: patient.name || "" },
+      { patientId: patient.id, phone: patient.phone, name: patient.name || "", identitySource: "local_demo" },
       String(text)
     );
     res.json({ reply: result.reply, handoffReason: result.handoffReason });

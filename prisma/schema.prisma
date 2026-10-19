@@ -105,6 +105,8 @@ model Appointment {
 
   reminder24hSentAt DateTime?
   reminder2hSentAt  DateTime?
+  // Durable pointer for recovering one-appointment portal links after a move.
+  replacementAppointmentId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -113,6 +115,7 @@ model Appointment {
   @@index([status])
   @@index([professionalId, startsAt])
   @@index([clinicId])
+  @@index([replacementAppointmentId])
 }
 
 // Estado como String por la misma razón que en Appointment. Valores:
@@ -353,10 +356,28 @@ model PortalAccess {
   kind String
   status String @default("PROCESSING")
   appointmentId String?
+  patientId String?
   waitlistId String?
   expiresAt DateTime
   revokedAt DateTime?
   createdAt DateTime @default(now())
+}
+
+// A code is tied to one random browser request token and one phone.
+// Only a slow hash is stored; neither the code nor the browser token is persisted.
+model PhoneVerification {
+  id String @id @default(cuid())
+  tokenHash String
+  phone String
+  codeHash String
+  salt String
+  attempts Int @default(0)
+  expiresAt DateTime
+  verifiedAt DateTime?
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([tokenHash, createdAt])
+  @@index([phone, createdAt])
 }
 
 model ContactRequest {

@@ -23,7 +23,7 @@ export async function processInbox() {
       try {
         if (generated === null) {
           const patient = await findOrCreatePatient(row.phone, row.name || undefined);
-          generated = (await handleIncomingMessage({ patientId: patient.id, phone: patient.phone, name: patient.name || "" }, row.text)).reply;
+          generated = (await handleIncomingMessage({ patientId: patient.id, phone: patient.phone, name: patient.name || "", identitySource: "signed_whatsapp" }, row.text)).reply;
           await prisma.inboundMessage.updateMany({ where: { id: row.id, claimToken: token }, data: { reply: generated } });
         }
         if (generated) await sendText(row.phone, generated);

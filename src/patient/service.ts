@@ -7,6 +7,7 @@ import { bookAppointment, cancelAppointment, confirmAppointment, rescheduleAppoi
 import { getQualifiedProfessionals } from "../services/professionals";
 import { joinWaitlist } from "../services/waitlist";
 import { withConversation } from "../lib/conversationLock";
+import { verifiedChallenge } from "./phoneVerification";
 
 export const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 export const contactSchema = z.object({ name: z.string().trim().min(2).max(80), phone: z.string().transform(s => s.replace(/[\s()+-]/g, "")).pipe(z.string().regex(/^[1-9]\d{7,14}$/, "Incluye el prefijo internacional en el teléfono.")) });
@@ -34,23 +35,29 @@ export async function publicCreate(token: string, kind: "booking" | "waitlist", 
     if (previous) {
       if (previous.requestHash !== requestHash || previous.kind !== kind) throw new Error("Esta solicitud ya se utilizó. Empieza una nueva reserva.");
       if (previous.status !== "READY") throw new Error("Esta solicitud requiere revisión. Contacta con recepción antes de repetirla.");
+      if (!previous.patientId) throw new Error("Este enlace anterior requiere nueva verificación. Contacta con recepción.");
       if (previous.revokedAt || previous.expiresAt < new Date()) throw new Error("El enlace ha caducado. Contacta con recepción.");
       return { ok: true, kind, appointmentId: previous.appointmentId };
     }
+    const challenge = await verifiedChallenge(key, data.phone);
     await validateProfessional(data.serviceId, data.professionalId);
     if ("startsAt" in data) portalDate(data.startsAt);
     else { if (portalDate(data.toDate) < portalDate(data.fromDate)) throw new Error("La fecha final debe ser posterior a la inicial."); }
     // The durable PROCESSING marker prevents a retry from repeating an ambiguous interrupted booking.
-    await prisma.portalAccess.create({ data: { tokenHash: key, requestHash, kind, contactName: data.name, contactPhone: data.phone, expiresAt: DateTime.now().plus({ days: 90 }).toJSDate() } });
+    await prisma.$transaction(async tx => {
+      const claimed = await tx.phoneVerification.updateMany({ where: { id: challenge.id, consumedAt: null, expiresAt: { gt: new Date() } }, data: { consumedAt: new Date() } });
+      if (!claimed.count) throw new Error("Verifica este teléfono antes de continuar.");
+      await tx.portalAccess.create({ data: { tokenHash: key, requestHash, kind, contactName: data.name, contactPhone: data.phone, expiresAt: DateTime.now().plus({ days: 90 }).toJSDate() } });
+    });
     try {
       const patient = await prisma.patient.upsert({ where: { phone: data.phone }, update: {}, create: { phone: data.phone, name: data.name } });
       if ("startsAt" in data) {
         const appointment = await bookAppointment({ patientId: patient.id, patientName: data.name, patientPhone: data.phone, serviceId: data.serviceId, professionalId: data.professionalId, start: portalDate(data.startsAt) });
-        await prisma.portalAccess.update({ where: { tokenHash: key }, data: { status: "READY", appointmentId: appointment.id } });
+        await prisma.portalAccess.update({ where: { tokenHash: key }, data: { status: "READY", appointmentId: appointment.id, patientId: patient.id } });
         return { ok: true, kind, appointmentId: appointment.id };
       }
       const entry = await joinWaitlist({ patientId: patient.id, serviceId: data.serviceId, professionalId: data.professionalId, earliestDate: portalDate(data.fromDate).startOf("day"), latestDate: portalDate(data.toDate).endOf("day"), preferredTimeOfDay: data.preferredTimeOfDay });
-      await prisma.portalAccess.update({ where: { tokenHash: key }, data: { status: "READY", waitlistId: entry.id } });
+      await prisma.portalAccess.update({ where: { tokenHash: key }, data: { status: "READY", waitlistId: entry.id, patientId: patient.id } });
       return { ok: true, kind, appointmentId: null };
     } catch (error) {
       await prisma.portalAccess.update({ where: { tokenHash: key }, data: { status: "REVIEW" } });
@@ -59,10 +66,27 @@ export async function publicCreate(token: string, kind: "booking" | "waitlist", 
   });
 }
 export async function portalAppointment(token: string) {
-  const access = await prisma.portalAccess.findUnique({ where: { tokenHash: tokenHash(token) } });
+  const key = tokenHash(token);
+  const access = await prisma.portalAccess.findUnique({ where: { tokenHash: key } });
   if (!access || access.revokedAt || access.expiresAt <= new Date() || !access.appointmentId || access.status !== "READY") throw new Error("Este enlace no está disponible o ha caducado. Contacta con recepción.");
-  const appointment = await prisma.appointment.findFirst({ where: { id: access.appointmentId, clinicId: "default" }, include: { professional: true } });
-  if (!appointment) throw new Error("La cita no está disponible. Contacta con recepción.");
+  if (!access.patientId) throw new Error("Este enlace anterior requiere nueva verificación. Contacta con recepción.");
+  const first = await prisma.appointment.findFirst({ where: { id: access.appointmentId, clinicId: "default", patientId: access.patientId }, include: { professional: true, patient: true } });
+  if (!first) throw new Error("La cita no está disponible. Contacta con recepción.");
+  let appointment: typeof first = first;
+  if (access.contactPhone && appointment.patient.phone !== access.contactPhone) throw new Error("Este enlace no corresponde al paciente. Contacta con recepción.");
+  // A move is durably recorded before the old appointment changes state.
+  // Recover a stale link even if the post-move portal update failed or crashed.
+  for (let hops = 0; hops < 5 && appointment.status === "CANCELLED" && appointment.replacementAppointmentId; hops++) {
+    const next: typeof first | null = await prisma.appointment.findFirst({ where: { id: appointment.replacementAppointmentId, clinicId: "default", patientId: access.patientId }, include: { professional: true, patient: true } });
+    if (!next) throw new Error("El cambio de cita requiere revisión. Contacta con recepción.");
+    try {
+      await prisma.portalAccess.updateMany({ where: { tokenHash: key, appointmentId: appointment.id, patientId: access.patientId, revokedAt: null }, data: { appointmentId: next.id } });
+    } catch {
+      // The durable lineage still gives the correct appointment; a later read retries repair.
+    }
+    appointment = next;
+  }
+  if (appointment.status === "CANCELLED" && appointment.replacementAppointmentId) throw new Error("El cambio de cita requiere revisión. Contacta con recepción.");
   return appointment;
 }
 export async function manageAppointment(token: string, action: "cancel" | "change" | "confirm", startsAt?: string) {
@@ -77,8 +101,7 @@ export async function manageAppointment(token: string, action: "cancel" | "chang
       const start = portalDate(z.string().datetime({ offset: true }).parse(startsAt));
       if (start.toMillis() === a.startsAt.getTime()) return;
       const patient = await prisma.patient.findUniqueOrThrow({ where: { id: a.patientId } });
-      const next = await rescheduleAppointment({ appointmentId: a.id, patientId: a.patientId, patientName: patient.name || "", patientPhone: patient.phone, newStart: start });
-      await prisma.portalAccess.update({ where: { tokenHash: key }, data: { appointmentId: next.id } });
+      await rescheduleAppointment({ appointmentId: a.id, patientId: a.patientId, patientName: patient.name || "", patientPhone: patient.phone, newStart: start });
     });
   });
 }

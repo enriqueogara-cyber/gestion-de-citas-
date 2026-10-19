@@ -48,7 +48,7 @@ dailyRouter.post("/api/appointments/:id/link", async (req, res) => {
   const token = randomBytes(32).toString("hex");
   await prisma.$transaction([
     prisma.portalAccess.updateMany({ where: { appointmentId: a.id }, data: { revokedAt: new Date() } }),
-    prisma.portalAccess.create({ data: { tokenHash: digest(token), requestHash: "staff", kind: "booking", status: "READY", appointmentId: a.id, expiresAt: DateTime.now().plus({ days: 90 }).toJSDate() } }),
+    prisma.portalAccess.create({ data: { tokenHash: digest(token), requestHash: "staff", kind: "booking", status: "READY", appointmentId: a.id, patientId: a.patientId, expiresAt: DateTime.now().plus({ days: 90 }).toJSDate() } }),
   ]);
   res.json({ token });
 });

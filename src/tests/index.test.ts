@@ -24,3 +24,4 @@ import "./singleFlight.test";
 import "./demoScenarios.test";
 import "./slotPresentation.test";
 import "./rateLimit.test";
+import "./privacy.test";

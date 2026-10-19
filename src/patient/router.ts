@@ -11,9 +11,11 @@ import { rateLimit } from "../lib/rateLimit";
 import { getAvailability, SlotTakenError } from "../services/appointments";
 import { serviceLabel, APPOINTMENT_STATUS_LABEL } from "../lib/labels";
 import { contactSchema, publicCreate, portalAppointment, manageAppointment, portalDate } from "./service";
+import { requestPhoneCode, verifyPhoneCode } from "./phoneVerification";
 import type { Request, Response } from "express";
 
 export const patientRouter = asyncRouter();
+patientRouter.use((_req, res, next) => { res.setHeader("Referrer-Policy", "no-referrer"); next(); });
 patientRouter.use("/api", rateLimit({ windowMs: 60_000, max: 60 }));
 patientRouter.use("/api", (req, res, next) => {
   if (process.env.NODE_ENV === "production" && process.env.PUBLIC_BOOKING_ENABLED !== "true") { res.status(503).json({ error: "Las reservas online aún no están activadas. Contacta con la clínica." }); return; }
@@ -38,6 +40,14 @@ patientRouter.get("/api/slots", action(async (req, res) => {
   res.json({ slots: slots.filter(d => d.toMillis() > earliest).map(d => ({ iso: d.toISO(), label: d.setZone(clinicConfig.timezone).toFormat("HH:mm") })) });
 }));
 patientRouter.post("/api/book", rateLimit({ windowMs: 60_000, max: 8 }), action(async (req, res) => { res.json(await publicCreate(token(req), "booking", req.body)); }));
+patientRouter.post("/api/verification/start", rateLimit({ windowMs: 60_000, max: 3 }), action(async (req, res) => {
+  const body = z.object({ phone: z.string() }).parse(req.body);
+  res.json(await requestPhoneCode(token(req), body.phone));
+}));
+patientRouter.post("/api/verification/confirm", rateLimit({ windowMs: 60_000, max: 8 }), action(async (req, res) => {
+  const body = z.object({ code: z.string() }).parse(req.body);
+  res.json(await verifyPhoneCode(token(req), body.code));
+}));
 patientRouter.post("/api/waitlist", rateLimit({ windowMs: 60_000, max: 8 }), action(async (req, res) => { res.json(await publicCreate(token(req), "waitlist", req.body)); }));
 patientRouter.post("/api/contact", rateLimit({ windowMs: 60_000, max: 3 }), action(async (req, res) => {
   const data = contactSchema.extend({ message: z.string().trim().min(3).max(500) }).parse(req.body);

@@ -216,6 +216,24 @@ export async function rescheduleAppointment(params: {
     recoveredFromWaitlist: old.recoveredFromWaitlist,
   });
 
+  // Persist the lineage before cancelling the original. A crash after the
+  // cancellation can then repair stale portal links on their next read.
+  let linked;
+  try {
+    linked = await prisma.appointment.updateMany({
+      where: { id: old.id, patientId: params.patientId, status: old.status, replacementAppointmentId: null },
+      data: { replacementAppointmentId: newAppt.id },
+    });
+  } catch (err) {
+    try { await cancelAppointment(newAppt.id, params.patientId); }
+    catch (compensationError) { logger.error("reschedule_lineage_compensation_failed", { oldAppointmentId: old.id, newAppointmentId: newAppt.id, errorType: (compensationError as Error).name }); }
+    throw err;
+  }
+  if (!linked.count) {
+    await cancelAppointment(newAppt.id, params.patientId);
+    throw new BookingValidationError("El cambio de cita requiere revisión; inténtalo más tarde.", "INVALID_STATE");
+  }
+
   try {
     await cancelAppointment(old.id, params.patientId);
   } catch (cancelOldErr) {
@@ -252,6 +270,7 @@ export async function rescheduleAppointment(params: {
       const oldAfterCompensation = await prisma.appointment.findUnique({ where: { id: old.id } });
 
       if (newNow?.status === "CANCELLED" && oldAfterCompensation && ["PENDING_CONFIRMATION", "CONFIRMED"].includes(oldAfterCompensation.status)) {
+        await prisma.appointment.updateMany({ where: { id: old.id, replacementAppointmentId: newAppt.id }, data: { replacementAppointmentId: null } });
         await recordEvent("AGENT_ERROR", {
           patientId: params.patientId,
           appointmentId: old.id,
@@ -278,10 +297,14 @@ export async function rescheduleAppointment(params: {
   }
 
   // Links issued by reception or the patient portal follow the replacement.
-  await prisma.portalAccess.updateMany({
-    where: { appointmentId: old.id, revokedAt: null },
-    data: { appointmentId: newAppt.id },
-  });
+  try {
+    await prisma.portalAccess.updateMany({
+      where: { appointmentId: old.id, patientId: params.patientId, revokedAt: null },
+      data: { appointmentId: newAppt.id },
+    });
+  } catch {
+    logger.error("portal_link_update_deferred", { oldAppointmentId: old.id, newAppointmentId: newAppt.id });
+  }
 
   await recordEvent("APPOINTMENT_RESCHEDULED", {
     patientId: params.patientId,
