@@ -11,6 +11,7 @@ import { simulatorRouter } from "./simulator/router";
 import { startScheduler } from "./scheduler/reminders";
 import { loadServiceCatalog } from "./services/serviceCatalog";
 import { logger } from "./lib/logger";
+import { assertPilotTestConfiguration } from "./whatsapp/transport";
 import { patientRouter } from "./patient/router";
 import { dailyRouter } from "./simulator/dailyRouter";
 
@@ -35,6 +36,7 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 // memoria ANTES de aceptar tráfico — si no, la primera petición podría ver
 // una lista de servicios vacía mientras se siembra la tabla.
 async function main() {
+  assertPilotTestConfiguration();
   await loadServiceCatalog();
   await getClinicSettings();
   await bootstrapStaff();

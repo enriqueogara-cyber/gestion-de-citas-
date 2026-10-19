@@ -6,18 +6,21 @@ import { prisma } from "../../db/client";
 import { cleanTransactionalData } from "./setup";
 import { sendTemplate, sendText } from "../../whatsapp/client";
 import { enqueueMessage, processInbox } from "../../whatsapp/inbox";
-import { MetaSendError, markStaleMetaSendsUnknown, recordMetaStatus } from "../../whatsapp/outbound";
-import { graphApiVersion, setMetaTransportForTests } from "../../whatsapp/transport";
+import { MetaSendError, PilotSendLimitError, markStaleMetaSendsUnknown, recordMetaStatus } from "../../whatsapp/outbound";
+import { assertPilotTestConfiguration, graphApiVersion, setMetaTransportForTests } from "../../whatsapp/transport";
+import { executeTool } from "../../agent/tools";
 import { configuredTemplate } from "../../whatsapp/templates";
 import { DateTime } from "luxon";
-import { ensureCatalogReady } from "./setup";
+import { ensureCatalogReady, makeProfessional } from "./setup";
 import { handleWaitlistOfferExpiredJob, offerFreedSlot } from "../../services/waitlistOrchestrator";
 
 const phone = "34900000123"; // Ficticio; el transporte simulado nunca hace HTTP externo.
 const original = {
   secret: process.env.WHATSAPP_APP_SECRET, numberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
   allowlist: process.env.WHATSAPP_ALLOWED_TEST_NUMBERS, enabled: process.env.WHATSAPP_SEND_ENABLED,
-  version: process.env.WHATSAPP_GRAPH_VERSION,
+  version: process.env.WHATSAPP_GRAPH_VERSION, limit: process.env.WHATSAPP_TEST_SEND_LIMIT,
+  publicBooking: process.env.PUBLIC_BOOKING_ENABLED, databaseUrl: process.env.DATABASE_URL,
+  allowMutations: process.env.WHATSAPP_TEST_ALLOW_MUTATIONS,
 };
 let calls: Array<{ url: string; body: Record<string, unknown> }> = [];
 
@@ -30,6 +33,8 @@ describe("WhatsApp Cloud API simulada", () => {
     process.env.WHATSAPP_PHONE_NUMBER_ID = "test-number-id";
     process.env.WHATSAPP_ALLOWED_TEST_NUMBERS = phone;
     process.env.WHATSAPP_SEND_ENABLED = "false";
+    process.env.WHATSAPP_TEST_SEND_LIMIT = "5";
+    process.env.WHATSAPP_TEST_ALLOW_MUTATIONS = "false";
     delete process.env.WHATSAPP_GRAPH_VERSION;
     setMetaTransportForTests(async (url, body) => { calls.push({ url, body }); return { messages: [{ id: `wamid.mock-${calls.length}` }] }; });
   });
@@ -38,7 +43,9 @@ describe("WhatsApp Cloud API simulada", () => {
     for (const [name, value] of Object.entries({
       WHATSAPP_APP_SECRET: original.secret, WHATSAPP_PHONE_NUMBER_ID: original.numberId,
       WHATSAPP_ALLOWED_TEST_NUMBERS: original.allowlist, WHATSAPP_SEND_ENABLED: original.enabled,
-      WHATSAPP_GRAPH_VERSION: original.version,
+      WHATSAPP_GRAPH_VERSION: original.version, WHATSAPP_TEST_SEND_LIMIT: original.limit,
+      PUBLIC_BOOKING_ENABLED: original.publicBooking, DATABASE_URL: original.databaseUrl,
+      WHATSAPP_TEST_ALLOW_MUTATIONS: original.allowMutations,
     })) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
   });
 
@@ -172,6 +179,63 @@ describe("WhatsApp Cloud API simulada", () => {
     setMetaTransportForTests(null);
     await assert.rejects(() => sendTemplate(phone, "recordatorio_cita_24h", "es", ["martes"], "blocked:key"), /desactivados/);
     assert.equal(await prisma.whatsAppOutbound.count(), 0);
+  });
+
+  test("la activación exige base de pruebas, portal cerrado, un móvil y cupo pequeño", () => {
+    process.env.WHATSAPP_SEND_ENABLED = "true";
+    process.env.PUBLIC_BOOKING_ENABLED = "false";
+    process.env.DATABASE_URL = "file:./test.db";
+    process.env.WHATSAPP_TEST_SEND_LIMIT = "2";
+    assert.doesNotThrow(assertPilotTestConfiguration);
+    process.env.DATABASE_URL = "file:./dev.db";
+    assert.throws(assertPilotTestConfiguration, /test.db/);
+    process.env.DATABASE_URL = "file:./test.db";
+    process.env.PUBLIC_BOOKING_ENABLED = "true";
+    assert.throws(assertPilotTestConfiguration, /portal público/);
+    process.env.PUBLIC_BOOKING_ENABLED = "false";
+    process.env.WHATSAPP_ALLOWED_TEST_NUMBERS = `${phone},34900000999`;
+    assert.throws(assertPilotTestConfiguration, /exactamente un número/);
+    process.env.WHATSAPP_ALLOWED_TEST_NUMBERS = phone;
+    process.env.WHATSAPP_TEST_SEND_LIMIT = "6";
+    assert.throws(assertPilotTestConfiguration, /entre 1 y 5/);
+  });
+
+  test("el cupo persiste, reenvíos no consumen otro envío y no se procesa otra petición", async () => {
+    process.env.WHATSAPP_SEND_ENABLED = "true"; // Transporte simulado: ninguna llamada HTTP externa.
+    process.env.WHATSAPP_TEST_SEND_LIMIT = "2";
+    const first = await sendTemplate(phone, "confirmacion_cita", "es", ["martes"], "pilot:first");
+    await sendTemplate(phone, "confirmacion_cita", "es", ["miércoles"], "pilot:second");
+    assert.equal((await sendTemplate(phone, "confirmacion_cita", "es", ["martes"], "pilot:first")).id, first.id);
+    await assert.rejects(() => sendTemplate(phone, "confirmacion_cita", "es", ["jueves"], "pilot:third"), PilotSendLimitError);
+    assert.equal(await prisma.whatsAppOutbound.count(), 2);
+    assert.equal(calls.length, 2);
+    await enqueueMessage({ id: "wamid.after-limit", phone, text: "Quiero reservar", sentAt: new Date() });
+    await processInbox();
+    assert.equal((await prisma.inboundMessage.findUniqueOrThrow({ where: { id: "wamid.after-limit" } })).status, "FAILED");
+    assert.equal(await prisma.patient.count(), 0);
+    assert.equal(await prisma.appointment.count(), 0);
+  });
+
+  test("identidad firmada ficticia consulta huecos y gestiona una cita solo en test.db", async () => {
+    assert.match(process.env.DATABASE_URL || "", /^file:\.\/test(?:-[\w-]+)?\.db$/);
+    const patient = await prisma.patient.create({ data: { phone, name: "Paciente ficticio" } });
+    await makeProfessional("Profesional ficticio", ["revision"]);
+    const ctx = { patientId: patient.id, phone, name: "Paciente ficticio", identitySource: "signed_whatsapp" as const };
+    const availability = await executeTool("check_availability", { service_id: "revision", days_ahead: 14 }, ctx);
+    const start = /start_iso=(\S+)/.exec(availability.text)?.[1];
+    assert.ok(start, availability.text);
+    process.env.WHATSAPP_SEND_ENABLED = "true";
+    assert.match((await executeTool("book_appointment", { service_id: "revision", start_iso: start }, ctx)).text, /^ERROR: la prueba/);
+    assert.equal(await prisma.appointment.count(), 0);
+    process.env.WHATSAPP_SEND_ENABLED = "false";
+    const booked = await executeTool("book_appointment", { service_id: "revision", start_iso: start }, ctx);
+    assert.match(booked.text, /^OK:/);
+    const appointmentId = /appointment_id=([^)]*)/.exec(booked.text)?.[1];
+    assert.ok(appointmentId);
+    assert.match((await executeTool("confirm_appointment", { appointment_id: appointmentId }, ctx)).text, /^OK:/);
+    assert.match((await executeTool("cancel_appointment", { appointment_id: appointmentId }, ctx)).text, /^OK:/);
+    assert.equal((await prisma.appointment.findUniqueOrThrow({ where: { id: appointmentId } })).status, "CANCELLED");
+    assert.equal(calls.length, 0);
   });
 
   test("oferta y caducidad de lista de espera usan plantillas sin datos del servicio", async () => {

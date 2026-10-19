@@ -18,9 +18,28 @@ export function graphApiVersion() {
   return version;
 }
 
+export function pilotSendLimit() {
+  const raw = process.env.WHATSAPP_TEST_SEND_LIMIT;
+  const limit = Number(raw);
+  if (!raw || !Number.isInteger(limit) || limit < 1 || limit > 5) {
+    throw new Error("WHATSAPP_TEST_SEND_LIMIT debe estar entre 1 y 5 para la prueba bidireccional.");
+  }
+  return limit;
+}
+
+export function assertPilotTestConfiguration() {
+  if (process.env.WHATSAPP_SEND_ENABLED !== "true") return;
+  if (process.env.DATABASE_URL !== "file:./test.db") throw new Error("WhatsApp solo puede activarse con prisma/test.db durante el piloto.");
+  if (process.env.PUBLIC_BOOKING_ENABLED !== "false") throw new Error("El portal público debe seguir desactivado durante el piloto.");
+  const allowed = (process.env.WHATSAPP_ALLOWED_TEST_NUMBERS || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (allowed.length !== 1 || !/^[1-9]\d{7,14}$/.test(allowed[0])) throw new Error("El piloto requiere exactamente un número de prueba autorizado.");
+  pilotSendLimit();
+}
+
 export function assertWhatsAppSendAllowed(phone: string) {
   if (!/^[1-9]\d{7,14}$/.test(phone)) throw new Error("Número de WhatsApp inválido.");
   if (testPost) return;
+  assertPilotTestConfiguration();
   if (process.env.WHATSAPP_SEND_ENABLED !== "true" || !isAllowedTestPhone(phone)) {
     throw new Error("Envíos de WhatsApp desactivados o número fuera de la lista de prueba.");
   }

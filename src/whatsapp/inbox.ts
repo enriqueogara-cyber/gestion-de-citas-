@@ -3,7 +3,7 @@ import { prisma } from "../db/client";
 import { findOrCreatePatient } from "../services/patients";
 import { handleIncomingMessage } from "../agent/claude";
 import { sendText } from "./client";
-import { markStaleMetaSendsUnknown, MetaSendError } from "./outbound";
+import { markStaleMetaSendsUnknown, MetaSendError, pilotSendLimitReached } from "./outbound";
 import { logger } from "../lib/logger";
 export async function enqueueMessage(message: { id: string; phone: string; name?: string; text: string; sentAt?: Date }) {
   await prisma.inboundMessage.upsert({ where: { id: message.id }, update: {}, create: message });
@@ -24,6 +24,7 @@ export async function processInbox() {
       let generated = row.reply;
       try {
         if (generated === null) {
+          if (await pilotSendLimitReached()) throw new Error("Cupo del piloto agotado.");
           const patient = await findOrCreatePatient(row.phone, row.name || undefined);
           generated = (await handleIncomingMessage({ patientId: patient.id, phone: patient.phone, name: patient.name || "", identitySource: "signed_whatsapp" }, row.text)).reply;
           await prisma.inboundMessage.updateMany({ where: { id: row.id, claimToken: token }, data: { reply: generated } });
@@ -33,8 +34,8 @@ export async function processInbox() {
         // needed). Delivery is tracked separately by signed status webhooks.
         await prisma.inboundMessage.updateMany({ where: { id: row.id, claimToken: token }, data: { status: "COMPLETED", claimToken: null, lastError: null } });
       } catch (error) {
-        logger.error("inbox_processing_failed", { id: row.id });
         const providerOutcome = error instanceof MetaSendError ? error.outcome : null;
+        logger.error("inbox_processing_failed", { errorType: (error as Error)?.name || "Error", ...(providerOutcome ? { providerOutcome } : {}) });
         await prisma.inboundMessage.updateMany({ where: { id: row.id, claimToken: token }, data: { status: generated === null || providerOutcome || row.attempts >= 4 ? "FAILED" : "PENDING", claimToken: null, lastError: providerOutcome === "unknown" ? "Resultado de Meta desconocido; revisar antes de reenviar." : "No se pudo procesar o aceptar el mensaje.", nextAttemptAt: new Date(Date.now() + 60_000 * (row.attempts + 1)) } });
       }
     }

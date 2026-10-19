@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { prisma } from "../db/client";
-import { assertWhatsAppSendAllowed, postMetaMessage } from "./transport";
+import { assertWhatsAppSendAllowed, pilotSendLimit, postMetaMessage } from "./transport";
+import { logger } from "../lib/logger";
 
 export type MetaDeliveryStatus = "sent" | "delivered" | "read" | "failed";
 const statusMap: Record<MetaDeliveryStatus, string> = { sent: "SENT", delivered: "DELIVERED", read: "READ", failed: "FAILED" };
@@ -11,6 +12,18 @@ export class MetaSendError extends Error {
     super(outcome === "unknown" ? "Resultado del envío desconocido; requiere revisión, no se reenvía automáticamente." : "Meta rechazó el mensaje; requiere revisión.");
     this.name = "MetaSendError";
   }
+}
+
+export class PilotSendLimitError extends Error {
+  constructor() {
+    super("Cupo de envíos de la prueba agotado; revisar antes de continuar.");
+    this.name = "PilotSendLimitError";
+  }
+}
+
+export async function pilotSendLimitReached() {
+  if (process.env.WHATSAPP_SEND_ENABLED !== "true") return false;
+  return (await prisma.whatsAppOutbound.count()) >= pilotSendLimit();
 }
 
 function providerError(error: unknown) {
@@ -29,10 +42,17 @@ export async function sendTracked(phone: string, kind: "text" | "template", key:
   const payloadHash = payloadDigest(payload);
   let row;
   try {
-    row = await prisma.whatsAppOutbound.create({ data: { idempotencyKey: key, payloadHash, phone, kind, status: "SENDING" } });
+    row = await prisma.$transaction(async tx => {
+      const created = await tx.whatsAppOutbound.create({ data: { idempotencyKey: key, payloadHash, phone, kind, status: "SENDING" } });
+      if (process.env.WHATSAPP_SEND_ENABLED === "true" && await tx.whatsAppOutbound.count() > pilotSendLimit()) throw new PilotSendLimitError();
+      return created;
+    });
   } catch (error) {
     const existing = await prisma.whatsAppOutbound.findUnique({ where: { idempotencyKey: key } });
-    if (!existing) throw error;
+    if (!existing) {
+      if (error instanceof PilotSendLimitError) logger.warn("whatsapp_pilot_send_limit_reached");
+      throw error;
+    }
     if (existing.phone !== phone || existing.kind !== kind || existing.payloadHash !== payloadHash) throw new Error("Clave de envío reutilizada con otro mensaje.");
     if (["ACCEPTED", "SENT", "DELIVERED", "READ"].includes(existing.status)) return existing;
     if (existing.status === "REJECTED") throw new MetaSendError("rejected", existing.errorCode || undefined);
@@ -45,11 +65,13 @@ export async function sendTracked(phone: string, kind: "text" | "template", key:
   } catch (error) {
     const classified = providerError(error);
     await prisma.whatsAppOutbound.updateMany({ where: { id: row.id, status: "SENDING" }, data: { status: classified.outcome === "rejected" ? "REJECTED" : "UNKNOWN", errorCode: classified.code } });
+    logger.warn("whatsapp_provider_send_failed", { outcome: classified.outcome, ...(classified.code ? { code: classified.code } : {}) });
     throw new MetaSendError(classified.outcome, classified.code);
   }
   const providerMessageId = (response as { messages?: Array<{ id?: unknown }> })?.messages?.[0]?.id;
   if (typeof providerMessageId !== "string" || !providerMessageId) {
     await prisma.whatsAppOutbound.updateMany({ where: { id: row.id, status: "SENDING" }, data: { status: "UNKNOWN" } });
+    logger.warn("whatsapp_provider_send_failed", { outcome: "unknown" });
     throw new MetaSendError("unknown");
   }
   row = await prisma.whatsAppOutbound.update({ where: { id: row.id }, data: { status: "ACCEPTED", providerMessageId, acceptedAt: new Date() } });

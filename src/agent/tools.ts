@@ -41,6 +41,7 @@ async function authorizedPatient(ctx: AgentContext) {
 }
 
 const patientTools = new Set(["book_appointment", "reschedule_appointment", "cancel_appointment", "confirm_appointment", "join_waitlist", "accept_waitlist_offer", "cancel_waitlist_entry", "request_human_handoff"]);
+const appointmentMutations = new Set(["book_appointment", "reschedule_appointment", "cancel_appointment", "confirm_appointment", "join_waitlist", "accept_waitlist_offer", "cancel_waitlist_entry"]);
 
 // Formato genérico (JSON Schema) que se traduce a "function calling" estilo
 // OpenAI al llamar a OpenRouter (ver agent/claude.ts). Es lo que el modelo
@@ -263,6 +264,10 @@ export async function executeTool(toolName: string, rawInput: any, ctx: AgentCon
 
   if (patientTools.has(toolName) && !(await authorizedPatient(ctx))) {
     return { text: "ERROR: verifica tu identidad antes de consultar o gestionar citas. Contacta con recepción." };
+  }
+  if (ctx.identitySource === "signed_whatsapp" && process.env.WHATSAPP_SEND_ENABLED === "true" &&
+      process.env.WHATSAPP_TEST_ALLOW_MUTATIONS !== "true" && appointmentMutations.has(toolName)) {
+    return { text: "ERROR: la prueba de WhatsApp permite consultar, pero todavía no modificar citas ni listas de espera." };
   }
 
   await recordEvent("AI_TOOL_CALLED", { patientId: ctx.patientId, metadata: { tool: toolName } });
