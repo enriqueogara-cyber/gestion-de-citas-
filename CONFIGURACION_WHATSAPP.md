@@ -27,12 +27,41 @@ Los recordatorios y avisos de lista de espera usan plantillas. La plantilla de c
 
 ## 3. Publicar un webhook HTTPS (paso manual)
 
-1. Publica esta aplicación en un entorno de prueba con una URL **HTTPS** accesible desde Meta y TLS válido. La ruta de callback es `https://TU_DOMINIO/webhook`. `localhost` no es accesible desde Meta. Protege el resto del sitio; esta guía no activa `/reservar` para pacientes reales.
+1. Para una prueba temporal, expón **solo el proxy de webhooks** descrito abajo mediante una URL **HTTPS** accesible desde Meta. La ruta de callback será `https://DIRECCION_TEMPORAL.trycloudflare.com/webhook`. `localhost` no es accesible desde Meta. Nunca apuntes el túnel directamente al backend del puerto 3000.
 2. En **WhatsApp > Configuration > Webhook**, introduce esa URL y el *Verify Token*. Meta hará una petición `GET /webhook` y deberá recibir el reto de verificación.
 3. Suscribe el campo **messages** de la cuenta de WhatsApp Business. Este campo trae mensajes entrantes y actualizaciones de estado de mensajes salientes.
 4. Comprueba en Meta que la suscripción y el número corresponden al *Phone Number ID* configurado. El servidor rechaza cargas sin firma HMAC SHA-256 válida y omite eventos de otro número.
 
 No desactives la comprobación de firma ni publiques secretos para resolver un fallo de verificación. Revisa URL, token, App Secret y suscripción.
+
+### Preparación del Quick Tunnel local (no iniciarlo hasta decidir probar Meta)
+
+El backend usa el puerto **3000** y el proxy limitado a `/webhook` usa el **3101**. El proxy escucha únicamente en `127.0.0.1`, admite `GET /webhook` para el reto de Meta y `POST /webhook` para los eventos firmados, y rechaza todas las demás rutas. Reenvía los bytes originales del POST para que Express compruebe la firma HMAC. Usa una base de prueba, no la base habitual `dev.db`.
+
+1. Comprueba que `prisma/test.db` tiene las migraciones con `$env:DATABASE_URL="file:./test.db"; npx prisma migrate status` en PowerShell. Guarda una copia SQLite consistente. **No ejecutes `npm run test:integration` mientras uses esa base:** el runner la recrea al empezar.
+2. En una ventana de PowerShell, desde el directorio del proyecto, prepara el backend de prueba sin mostrar valores privados:
+
+   ```powershell
+   $env:PORT="3000"
+   $env:DATABASE_URL="file:./test.db"
+   $env:BACKEND_BIND_HOST="127.0.0.1"
+   $env:PUBLIC_BOOKING_ENABLED="false"
+   $env:WHATSAPP_SEND_ENABLED="false"
+   $env:ADMIN_EMAIL=""
+   $env:ADMIN_PASSWORD=""
+   npm run dev
+   ```
+
+3. En otra ventana del mismo directorio, ejecuta `npm run webhook:proxy`. Este proceso no carga credenciales y no registra la URL ni el cuerpo de las peticiones.
+4. Si `cloudflared` no está disponible, instálalo desde las [descargas oficiales de Cloudflare](https://developers.cloudflare.com/tunnel/downloads/) y comprueba `cloudflared --version`. **Cuando quieras publicar el webhook temporal**, abre una tercera ventana y ejecuta exactamente:
+
+   ```powershell
+   cloudflared tunnel --url http://127.0.0.1:3101
+   ```
+
+5. Copia la URL `https://...trycloudflare.com` que muestre Cloudflare y añade `/webhook` en la configuración de Meta. La URL cambia cada vez que se reinicia el túnel. Termina el túnel con `Ctrl+C` al acabar. Un Quick Tunnel es para pruebas y cualquiera que conozca su URL puede solicitar el endpoint; aquí solo llega a la ruta estrecha del proxy, y el POST sigue necesitando la firma de Meta. La [documentación de Cloudflare](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/) indica que el túnel no requiere cuenta ni dominio y carece de garantía de disponibilidad. La opción de acceso por correo **no sirve para este webhook**, porque Meta es un cliente no interactivo.
+
+Mientras `WHATSAPP_SEND_ENABLED=false`, los mensajes entrantes firmados no activan al agente y no se envían respuestas. La verificación GET y la recepción de estados firmados sí funcionan. Mantén ambas opciones (`PUBLIC_BOOKING_ENABLED` y `WHATSAPP_SEND_ENABLED`) en `false` durante esta preparación.
 
 ## 4. Configurar el servidor sin publicar credenciales
 

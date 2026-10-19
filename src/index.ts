@@ -39,7 +39,7 @@ async function main() {
   await getClinicSettings();
   await bootstrapStaff();
 
-  app.listen(env.port, () => {
+  app.listen(env.port, process.env.BACKEND_BIND_HOST || "0.0.0.0", () => {
     logger.info("server_started", { clinic: clinicConfig.name, port: env.port });
     logger.info("simulator_ready", { url: `http://localhost:${env.port}/simulator/` });
     startScheduler();

@@ -17,3 +17,4 @@ import "./serviceProfessionalRule.test";
 import "./reception.test";
 import "./patientPortal.test";
 import "./whatsapp.test";
+import "./webhookProxy.test";

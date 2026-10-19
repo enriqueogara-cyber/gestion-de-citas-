@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { env } from "../config";
 import { validWebhookSignature } from "../services/staffAuth";
 import { enqueueMessage, processInbox } from "./inbox";
 import { logger } from "../lib/logger";
@@ -7,7 +6,8 @@ import { recordMetaStatus, MetaDeliveryStatus } from "./outbound";
 import { isAllowedTestPhone } from "./transport";
 export const whatsappWebhookRouter = Router();
 whatsappWebhookRouter.get("/webhook", (req, res) => {
-  if (env.whatsappVerifyToken && req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === env.whatsappVerifyToken) res.status(200).send(req.query["hub.challenge"]);
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+  if (verifyToken && req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === verifyToken) res.status(200).send(req.query["hub.challenge"]);
   else res.sendStatus(403);
 });
 whatsappWebhookRouter.post("/webhook", async (req, res, next) => {
