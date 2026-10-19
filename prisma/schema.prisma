@@ -336,6 +336,7 @@ model InboundMessage {
   phone String
   name String?
   text String
+  sentAt DateTime? // timestamp del mensaje de Meta, no la llegada del webhook
   status String @default("PENDING")
   attempts Int @default(0)
   claimToken String?
@@ -345,6 +346,36 @@ model InboundMessage {
   lastError String?
   createdAt DateTime @default(now())
   @@index([status, nextAttemptAt])
+}
+
+// One logical outbound request. HTTP acceptance and actual delivery are separate.
+model WhatsAppOutbound {
+  id String @id @default(cuid())
+  idempotencyKey String @unique
+  payloadHash String
+  phone String
+  kind String
+  status String @default("SENDING") // SENDING | UNKNOWN | REJECTED | ACCEPTED | SENT | DELIVERED | READ | FAILED
+  providerMessageId String? @unique
+  errorCode String?
+  acceptedAt DateTime?
+  statusAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status, updatedAt])
+}
+
+// Signed Meta callbacks are durable and deduplicated even if they arrive
+// before the HTTP send response is committed locally.
+model WhatsAppStatusEvent {
+  id String @id @default(cuid())
+  providerMessageId String
+  status String
+  occurredAt DateTime
+  errorCode String?
+  receivedAt DateTime @default(now())
+  @@unique([providerMessageId, status, occurredAt])
+  @@index([providerMessageId, occurredAt])
 }
 
 // A capability grants access to one web reservation only. Raw tokens are never stored.

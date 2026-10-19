@@ -16,3 +16,4 @@ import "./settings.test";
 import "./serviceProfessionalRule.test";
 import "./reception.test";
 import "./patientPortal.test";
+import "./whatsapp.test";

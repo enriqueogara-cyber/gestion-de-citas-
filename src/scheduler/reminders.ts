@@ -2,7 +2,7 @@ import cron from "node-cron";
 import { DateTime } from "luxon";
 import { prisma } from "../db/client";
 import { clinicConfig } from "../config";
-import { notifyPatient, notifyPatientTemplate } from "../notifications/notify";
+import { isDemoPhone, notifyPatientTemplate } from "../notifications/notify";
 import { recordEvent } from "../services/auditLog";
 import { serviceLabel } from "../lib/labels";
 import { logger } from "../lib/logger";
@@ -35,9 +35,8 @@ function formatWhen(date: Date): string {
  * "servicio al cliente" de WhatsApp (el paciente no ha escrito hoy), así
  * que usamos una plantilla aprobada en Meta en lugar de texto libre.
  *
- * Plantilla a crear en Meta Business Manager, nombre "recordatorio_cita_24h":
- *   "Hola {{1}}, te recordamos tu cita de {{2}} el {{3}}.
- *    Responde SI para confirmar o NO para cancelar y liberar el hueco."
+ * El contenido exacto y los parámetros aprobados se documentan en
+ * CONFIGURACION_WHATSAPP.md. No se envía el tipo de servicio a Meta.
  */
 async function handleReminder24hJob(appointmentId: string): Promise<void> {
   const appt = await prisma.appointment.findUnique({ where: { id: appointmentId }, include: { patient: true } });
@@ -47,20 +46,16 @@ async function handleReminder24hJob(appointmentId: string): Promise<void> {
     appt.patient,
     `Hola ${appt.patient.name || ""}, te recordamos tu cita de ${serviceLabel(appt.service)} el ${formatWhen(appt.startsAt)}. ` +
       `Responde SI para confirmar o NO para cancelar y liberar el hueco.`,
-    {
-      name: "recordatorio_cita_24h",
-      languageCode: "es",
-      bodyParams: [appt.patient.name || "", serviceLabel(appt.service), formatWhen(appt.startsAt)],
-    }
+    { kind: "REMINDER_24H", bodyParams: [formatWhen(appt.startsAt)] },
+    `reminder24h:${appt.id}`
   );
   await prisma.appointment.update({ where: { id: appt.id }, data: { reminder24hSentAt: new Date() } });
-  await recordEvent("REMINDER_SENT", { patientId: appt.patientId, appointmentId: appt.id, metadata: { kind: "24h" } });
+  await recordEvent(isDemoPhone(appt.patient.phone) ? "REMINDER_SENT" : "REMINDER_ACCEPTED", { patientId: appt.patientId, appointmentId: appt.id, metadata: { kind: "24h" } });
 }
 
 /**
- * Aviso ~2h antes. A estas alturas suele haber conversación reciente
- * (el paciente respondió al recordatorio de 24h), así que probamos con
- * texto libre; si Meta lo rechaza por ventana cerrada, caemos a plantilla.
+ * Aviso ~2h antes. Usamos plantilla incluso si hay conversación reciente:
+ * un timeout no debe disparar un segundo intento con otro formato.
  */
 async function handleReminder2hJob(appointmentId: string): Promise<void> {
   const appt = await prisma.appointment.findUnique({ where: { id: appointmentId }, include: { patient: true } });
@@ -68,18 +63,9 @@ async function handleReminder2hJob(appointmentId: string): Promise<void> {
 
   const hhmm = DateTime.fromJSDate(appt.startsAt).setZone(clinicConfig.timezone).toFormat("HH:mm");
   const msg = `Te esperamos hoy a las ${hhmm} para ${serviceLabel(appt.service)}. Si al final no puedes venir, avísanos y liberamos el hueco para otro paciente.`;
-  try {
-    await notifyPatient(appt.patient, msg);
-  } catch (err) {
-    logger.warn("reminder_2h_free_text_failed_trying_template", { appointmentId: appt.id, err });
-    await notifyPatientTemplate(appt.patient, msg, {
-      name: "recordatorio_cita_2h",
-      languageCode: "es",
-      bodyParams: [serviceLabel(appt.service), hhmm],
-    });
-  }
+  await notifyPatientTemplate(appt.patient, msg, { kind: "REMINDER_2H", bodyParams: [hhmm] }, `reminder2h:${appt.id}`);
   await prisma.appointment.update({ where: { id: appt.id }, data: { reminder2hSentAt: new Date() } });
-  await recordEvent("REMINDER_SENT", { patientId: appt.patientId, appointmentId: appt.id, metadata: { kind: "2h" } });
+  await recordEvent(isDemoPhone(appt.patient.phone) ? "REMINDER_SENT" : "REMINDER_ACCEPTED", { patientId: appt.patientId, appointmentId: appt.id, metadata: { kind: "2h" } });
 }
 
 async function runJobTick() {

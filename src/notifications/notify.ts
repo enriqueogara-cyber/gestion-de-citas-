@@ -1,6 +1,7 @@
 import { prisma } from "../db/client";
 import { sendText, sendTemplate } from "../whatsapp/client";
 import { logger } from "../lib/logger";
+import { configuredTemplate, TemplateKind } from "../whatsapp/templates";
 
 /**
  * Punto único para mandarle un mensaje "proactivo" a un paciente (aviso de
@@ -18,10 +19,10 @@ import { logger } from "../lib/logger";
  *
  * Con notify(): si el teléfono es de demo, el aviso se guarda como mensaje
  * del asistente en la conversación de ese paciente (así aparece en su chat
- * del simulador, tal cual vería el WhatsApp real). Si es un teléfono real,
- * se manda de verdad por WhatsApp Cloud API.
+ * del simulador, tal cual vería el WhatsApp real). Para un teléfono de
+ * prueba autorizado, el transporte sigue bloqueado salvo activación explícita.
  */
-export async function notifyPatient(patient: { id: string; phone: string }, text: string): Promise<void> {
+export async function notifyPatient(patient: { id: string; phone: string }, text: string, idempotencyKey?: string): Promise<void> {
   if (isDemoPhone(patient.phone)) {
     await prisma.conversationMessage.create({
       data: { patientId: patient.id, role: "assistant", content: text },
@@ -30,13 +31,13 @@ export async function notifyPatient(patient: { id: string; phone: string }, text
   }
 
   try {
-    await sendText(patient.phone, text);
+    await sendText(patient.phone, text, idempotencyKey);
   } catch (err) {
     // Registramos el fallo (plantilla no aprobada, ventana de 24h cerrada,
     // token caducado...) y lo relanzamos: quien llame decide si es
     // recuperable (los llamantes actuales ya corren dentro de un try/catch
     // que no tumba el flujo principal, ver agent/claude.ts).
-    logger.error("whatsapp_send_failed", { phone: patient.phone, err });
+    logger.error("whatsapp_send_failed", { patientId: patient.id, errorType: (err as Error).name });
     throw err;
   }
 }
@@ -55,7 +56,8 @@ export function isDemoPhone(phone: string): boolean {
 export async function notifyPatientTemplate(
   patient: { id: string; phone: string },
   readableFallbackText: string,
-  template: { name: string; languageCode: string; bodyParams: string[] }
+  template: { kind: TemplateKind; bodyParams: string[] },
+  idempotencyKey?: string
 ): Promise<void> {
   if (isDemoPhone(patient.phone)) {
     await prisma.conversationMessage.create({
@@ -65,9 +67,10 @@ export async function notifyPatientTemplate(
   }
 
   try {
-    await sendTemplate(patient.phone, template.name, template.languageCode, template.bodyParams);
+    const selected = configuredTemplate(template.kind);
+    await sendTemplate(patient.phone, selected.name, selected.languageCode, template.bodyParams, idempotencyKey);
   } catch (err) {
-    logger.error("whatsapp_template_send_failed", { phone: patient.phone, template: template.name, err });
+    logger.error("whatsapp_template_send_failed", { patientId: patient.id, kind: template.kind, errorType: (err as Error).name });
     throw err;
   }
 }

@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { prisma } from "../db/client";
 import { clinicConfig } from "../config";
-import { notifyPatient } from "../notifications/notify";
+import { notifyPatientTemplate } from "../notifications/notify";
 import { reserveAppointment, getService, SlotTakenError } from "../domain/bookingEngine";
 import { recordEvent } from "./auditLog";
 import { logger } from "../lib/logger";
@@ -64,16 +64,18 @@ export async function offerFreedSlot(
 
   const when = slotStart.setLocale("es").toFormat("cccc d 'de' LLLL 'a las' HH:mm");
   try {
-    await notifyPatient(
+    await notifyPatientTemplate(
       candidate.patient,
       `¡Buenas noticias! Se ha liberado un hueco para ${service.label} el ${when}. ` +
         `Es tuyo si respondes "SI" en los próximos ${clinicConfig.waitlistOfferWindowMinutes} minutos. ` +
-        `Si no te viene bien, no hace falta que contestes.`
+        `Si no te viene bien, no hace falta que contestes.`,
+      { kind: "WAITLIST_OFFER", bodyParams: [when, String(clinicConfig.waitlistOfferWindowMinutes)] },
+      `waitlist-offer:${candidate.id}:${expiresAt.toISOString()}`
     );
   } catch (err) {
     // La entrega puede ser ambigua. Conservamos la oferta hasta su vencimiento
     // y dejamos que el job libere el hold; reintentar aquí duplicaría avisos.
-    logger.error("waitlist_offer_notification_failed", { entryId: candidate.id, err });
+    logger.error("waitlist_offer_notification_failed", { entryId: candidate.id, errorType: (err as Error).name });
   }
 
   await recordEvent("WAITLIST_OFFER_CREATED", {
@@ -191,13 +193,15 @@ export async function handleWaitlistOfferExpiredJob(waitlistEntryId: string): Pr
   const slotStart = DateTime.fromJSDate(entry.offeredSlotStart);
   if (newlyExpired) {
     try {
-      await notifyPatient(
+      await notifyPatientTemplate(
         entry.patient,
         `Se ha pasado el tiempo para confirmar el hueco, lo hemos ofrecido a otro paciente. ` +
-          `Sigues en la lista de espera para el siguiente hueco disponible.`
+          `Sigues en la lista de espera para el siguiente hueco disponible.`,
+        { kind: "WAITLIST_EXPIRED", bodyParams: [] },
+        `waitlist-expired:${entry.id}:${entry.offerExpiresAt?.toISOString()}`
       );
     } catch (err) {
-      logger.error("waitlist_expiry_notification_failed", { entryId: entry.id, err });
+      logger.error("waitlist_expiry_notification_failed", { entryId: entry.id, errorType: (err as Error).name });
     }
     await recordEvent("WAITLIST_OFFER_EXPIRED", { patientId: entry.patientId, metadata: { service: entry.service } });
   }

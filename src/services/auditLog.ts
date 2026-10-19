@@ -32,6 +32,8 @@ export type AuditEventType =
   | "WAITLIST_OFFER_EXPIRED"
   | "SLOT_RECOVERED"
   | "REMINDER_SENT"
+  | "REMINDER_ACCEPTED"
+  | "WHATSAPP_DELIVERY_ATTENTION"
   | "CALENDAR_SYNC_FAILED"
   | "HUMAN_HANDOFF_REQUESTED"
   | "AGENT_ERROR"
@@ -98,7 +100,8 @@ export async function listAttentionItems(hours = 24): Promise<AuditEventView[]> 
   });
   const patients = await prisma.patient.findMany({ where: { aiPaused: true, clinicId: "default" }, take: 20, orderBy: { handoffRequestedAt: "asc" } });
   const jobs = await prisma.scheduledJob.findMany({ where: { status: "FAILED" }, take: 20, orderBy: { updatedAt: "desc" } });
-  return [...patients.map(p => ({ id: p.id, type: "HUMAN_HANDOFF_REQUESTED" as AuditEventType, patientId: p.id, appointmentId: null, metadata: { reason: p.handoffReason || "Atención del equipo" }, createdAt: p.handoffRequestedAt || p.createdAt })), ...jobs.map(j => ({ id: j.id, type: "SCHEDULED_JOB_FAILED" as AuditEventType, patientId: null, appointmentId: j.appointmentId, metadata: {}, createdAt: j.updatedAt })), ...rows.map((r) => ({
+  const outbound = await prisma.whatsAppOutbound.findMany({ where: { OR: [{ status: { in: ["UNKNOWN", "REJECTED", "FAILED"] } }, { status: "ACCEPTED", acceptedAt: { lte: new Date(Date.now() - 60 * 60_000) } }], updatedAt: { gte: since } }, take: 20, orderBy: { updatedAt: "desc" } });
+  return [...patients.map(p => ({ id: p.id, type: "HUMAN_HANDOFF_REQUESTED" as AuditEventType, patientId: p.id, appointmentId: null, metadata: { reason: p.handoffReason || "Atención del equipo" }, createdAt: p.handoffRequestedAt || p.createdAt })), ...jobs.map(j => ({ id: j.id, type: "SCHEDULED_JOB_FAILED" as AuditEventType, patientId: null, appointmentId: j.appointmentId, metadata: {}, createdAt: j.updatedAt })), ...outbound.map(m => ({ id: m.id, type: "WHATSAPP_DELIVERY_ATTENTION" as AuditEventType, patientId: null, appointmentId: null, metadata: { kind: m.kind, status: m.status === "ACCEPTED" ? "ACEPTADO_SIN_ESTADO" : m.status }, createdAt: m.updatedAt })), ...rows.map((r) => ({
     id: r.id,
     type: r.type as AuditEventType,
     patientId: r.patientId,

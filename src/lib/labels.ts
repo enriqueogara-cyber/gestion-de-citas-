@@ -66,6 +66,8 @@ export const AUDIT_EVENT_LABEL: Record<string, string> = {
   WAITLIST_OFFER_EXPIRED: "Oferta caducada",
   SLOT_RECOVERED: "Hueco recuperado",
   REMINDER_SENT: "Recordatorio enviado",
+  REMINDER_ACCEPTED: "Recordatorio aceptado por WhatsApp",
+  WHATSAPP_DELIVERY_ATTENTION: "Revisar entrega por WhatsApp",
   CALENDAR_SYNC_FAILED: "Fallo sincronizando calendario",
   HUMAN_HANDOFF_REQUESTED: "Derivado a atención humana",
   RESCHEDULE_INCONSISTENT: "Reschedule requiere revisión manual",

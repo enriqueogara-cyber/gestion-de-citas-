@@ -40,6 +40,8 @@ export async function cleanTransactionalData(): Promise<void> {
   await prisma.staffSession.deleteMany({});
   await prisma.staffUser.deleteMany({});
   await prisma.inboundMessage.deleteMany({});
+  await prisma.whatsAppStatusEvent.deleteMany({});
+  await prisma.whatsAppOutbound.deleteMany({});
   await prisma.availabilityBlock.deleteMany({});
   await prisma.conversationMessage.deleteMany({});
   await prisma.waitlistEntry.deleteMany({});
